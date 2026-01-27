@@ -111,7 +111,7 @@ class Paradise(Cable):
             first_row_nums = list(range(1, max_len + 1))
 
         return grid, first_row_nums
-    def bucket_reason(text: str) -> str:
+    def bucket_reason(self, text: str) -> str:
         t = text.lower()
         if "short" in t:
             print("returning short")

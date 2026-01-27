@@ -390,9 +390,8 @@ if uploaded_files:
             st.session_state.continuity_figs = {}  # numeric heatmaps per serial_number
         if "continuity_defect_figs" not in st.session_state:
             st.session_state.continuity_defect_figs = {}
-        COL_LAYOUT = [1.5, 1.2, 6, 1.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
+        COL_LAYOUT = [1.5, 1.2, 7.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
 
-        header_cols = st.columns(COL_LAYOUT)
 
         header_cols = st.columns(COL_LAYOUT)
 
@@ -402,7 +401,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Maps**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data
@@ -498,27 +496,7 @@ if uploaded_files:
                     if fig:
                         st.plotly_chart(fig, use_container_width=True, key=fig_key)
 
-            # ── Download CSV column ───────────────────────────
-            safe_sn = str(cable.serial_number).strip()
-            safe_len = str(int(cable.length)) if isinstance(cable.length, (int, float)) else str(cable.length).strip()
-
-            base_dir = Path("temp") / "paradise"/ safe_len / safe_sn
-            name = f"continuity_{safe_len}_{safe_sn}.csv"
-            temp_path =  base_dir / name
-
-            if temp_path.exists():
-                cols[3].download_button(
-                    label="Download CSV",
-                    data=temp_path.read_bytes(),
-                    file_name=name,
-                    mime="text/csv",
-                    key=f"continuity_csv_{cable.serial_number}",
-                )
-            else:
-                cols[3].markdown(
-                    "<span style='color:crimson'>Missing temp file</span>",
-                    unsafe_allow_html=True,
-                )
+            
 
     with Inverse_Continuity_Tab:
         st.subheader("Inverse Continuity")
@@ -567,9 +545,8 @@ if uploaded_files:
             st.session_state.inv_continuity_figs = {}  # numeric heatmaps per serial_number
         if "inv_continuity_defect_figs" not in st.session_state:
             st.session_state.inv_continuity_defect_figs = {}
-        COL_LAYOUT = [1.5, 1.2, 6, 1.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
+        COL_LAYOUT = [1.5, 1.2, 7.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
 
-        header_cols = st.columns(COL_LAYOUT)
 
         header_cols = st.columns(COL_LAYOUT)
 
@@ -579,7 +556,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Maps**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data
@@ -674,28 +650,6 @@ if uploaded_files:
                     if fig:
                         st.plotly_chart(fig, use_container_width=True, key=fig_key)
 
-            # ── Download CSV column ───────────────────────────
-            safe_sn = str(cable.serial_number).strip()
-            safe_len = str(int(cable.length)) if isinstance(cable.length, (int, float)) else str(cable.length).strip()
-
-            base_dir = Path("temp") / "paradise"/ safe_len / safe_sn
-            name = f"inv_continuity_{safe_len}_{safe_sn}.csv"
-            temp_path =  base_dir / name
-
-            if temp_path.exists():
-                cols[3].download_button(
-                    label="Download CSV",
-                    data=temp_path.read_bytes(),
-                    file_name=name,
-                    mime="text/csv",
-                    key=f"inv_continuity_csv_{cable.serial_number}",
-                )
-            else:
-                cols[3].markdown(
-                    "<span style='color:crimson'>Missing temp file</span>",
-                    unsafe_allow_html=True,
-                )
-
     with DCR_Tab:
         st.subheader("DC Resistance")
         has_resistance = has_data(cables, "resistance")
@@ -743,7 +697,7 @@ if uploaded_files:
             st.session_state.DCR_figs = {}  # numeric heatmaps per serial_number
         if "DCR_defect_figs" not in st.session_state:
             st.session_state.DCR_defect_figs = {}
-        COL_LAYOUT = [1.5, 1.2, 6, 1.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
+        COL_LAYOUT = [1.5, 1.2, 7.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
 
         header_cols = st.columns(COL_LAYOUT)
 
@@ -754,7 +708,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Maps**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data
@@ -849,27 +802,6 @@ if uploaded_files:
                     if fig:
                         st.plotly_chart(fig, use_container_width=True, key=fig_key)
 
-            # ── Download CSV column ───────────────────────────
-            safe_sn = str(cable.serial_number).strip()
-            safe_len = str(int(cable.length)) if isinstance(cable.length, (int, float)) else str(cable.length).strip()
-
-            base_dir = Path("temp") / "paradise"/ safe_len / safe_sn
-            name = f"DCR_{safe_len}_{safe_sn}.csv"
-            temp_path =  base_dir / name
-
-            if temp_path.exists():
-                cols[3].download_button(
-                    label="Download CSV",
-                    data=temp_path.read_bytes(),
-                    file_name=name,
-                    mime="text/csv",
-                    key=f"DCR_csv_{cable.serial_number}",
-                )
-            else:
-                cols[3].markdown(
-                    "<span style='color:crimson'>Missing temp file</span>",
-                    unsafe_allow_html=True,
-                )
     with Inverse_DCR_Tab:
         st.subheader("Inverse DC Resistance")
         has_inv_resistance = has_data(cables, "inv_resistance")
@@ -913,7 +845,7 @@ if uploaded_files:
             st.session_state.inv_DCR_figs = {}  # numeric heatmaps per serial_number
         if "inv_DCR_defect_figs" not in st.session_state:
             st.session_state.inv_DCR_defect_figs = {}
-        COL_LAYOUT = [1.5, 1.2, 6, 1.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
+        COL_LAYOUT = [1.5, 1.2, 7.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
 
         header_cols = st.columns(COL_LAYOUT)
 
@@ -924,7 +856,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Maps**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data
@@ -1019,27 +950,6 @@ if uploaded_files:
                     if fig:
                         st.plotly_chart(fig, use_container_width=True, key=fig_key)
 
-            # ── Download CSV column ───────────────────────────
-            safe_sn = str(cable.serial_number).strip()
-            safe_len = str(int(cable.length)) if isinstance(cable.length, (int, float)) else str(cable.length).strip()
-
-            base_dir = Path("temp") / "paradise"/ safe_len / safe_sn
-            name = f"inv_DCR_{safe_len}_{safe_sn}.csv"
-            temp_path =  base_dir / name
-
-            if temp_path.exists():
-                cols[3].download_button(
-                    label="Download CSV",
-                    data=temp_path.read_bytes(),
-                    file_name=name,
-                    mime="text/csv",
-                    key=f"inv_DCR_csv_{cable.serial_number}",
-                )
-            else:
-                cols[3].markdown(
-                    "<span style='color:crimson'>Missing temp file</span>",
-                    unsafe_allow_html=True,
-                )
     def collapse_channels(rows, *, prefer='first_non_blank'):
         """
         Convert rows like:
@@ -1136,10 +1046,9 @@ if uploaded_files:
 
 
         
-        COL_LAYOUT = [1.5, 1.2, 6, 1.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
+        COL_LAYOUT = [1.5, 1.2, 7.5]  # SN | Length | Maps | Download        st.subheader("Processed Cables")
 
 
-        header_cols = st.columns(COL_LAYOUT)
 
         st.subheader("Processed Cables")
 
@@ -1147,7 +1056,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Map**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data
@@ -1328,7 +1236,6 @@ if uploaded_files:
         header_cols[0].markdown("**Serial Number**")
         header_cols[1].markdown("**Length (in)**")
         header_cols[2].markdown("**Map**")
-        header_cols[3].markdown("**Download CSV**")
 
 
         #find all the cables with continuity data and create the buttons for the heatmap data

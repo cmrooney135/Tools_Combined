@@ -108,7 +108,6 @@ def is_continuity(testname):
 def is_inv_continuity(testname):
 
     if("continuity" or "continuity" in testname.lower() and "inv" in testname.lower()):
-        print("is inverse continuity")
         return True
     else:
         return False
@@ -288,7 +287,6 @@ def process_csv(
 
     # Normalize a test "kind" if you want to use controlled values
     def _kind_from_name(name: str) -> Optional[str]:
-        print(name)
         if is_1s_leakage(name):      return "leakage_1s"
         if is_leakage(name):         return "leakage"
         if is_inv_resistance(name):  return "inv_resistance"
@@ -515,6 +513,7 @@ def process_csv(
         }).dropna()
 
         if(is_resistance(test_name)):
+
             filtered_name = f"resistance_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"resistance_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -533,6 +532,7 @@ def process_csv(
             df_errors_extracted.to_csv(errors_path, index = False)
             df_extracted.to_csv(filtered_path, index=False)
         elif(is_inv_resistance(test_name)):
+
             filtered_name = f"inv_resistance_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"inv_resistance_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -551,7 +551,6 @@ def process_csv(
             df_extracted.to_csv(filtered_path, index=False)
             df_errors_extracted.to_csv(errors_path, index = False)
         elif(is_continuity(test_name)):
-            print("inside is continuity")
             filtered_name = f"continuity_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"continuity_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -571,7 +570,6 @@ def process_csv(
             df_errors_extracted.to_csv(errors_path, index = False)
             type = "Continuity"
         elif(is_inv_continuity(test_name)):
-            print("hello inverse continuity")
             filtered_name = f"inv_continuity_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"inv_continuity_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -585,7 +583,6 @@ def process_csv(
             filtered_path.mkdir(parents=True, exist_ok=True)
             errors_path = filtered_path / errors_name
             filtered_path = filtered_path / filtered_name
-            print(filtered_path)
            
             test.data = df_extracted
             test.failure_data = df_errors_extracted

@@ -529,43 +529,12 @@ if not cables:
 else:
     for cable in cables:
         st.markdown(f"### {cable.serial_number} — {cable.length} in")
-        ccols = st.columns([2, 6, 2])  # SN | Maps | CSV downloads
+        ccols = st.columns([2, 8])  # SN | Maps 
         with ccols[0]:
             st.markdown("**Serial Number**")
             st.markdown(cable.serial_number)
             st.markdown("**Length (in)**")
             st.markdown(str(cable.length))
-
-        with ccols[2]:
-            # Per-cable CSV downloads (if file paths exist)
-            safe_sn = str(cable.serial_number).strip()
-            safe_len = str(int(cable.length)) if isinstance(cable.length, (int, float)) else str(cable.length).strip()
-            base_dir = Path("temp") / "paradise"/ safe_len / safe_sn
-
-            per_files = [
-                (f"continuity_{safe_len}_{safe_sn}.csv", "Continuity CSV"),
-                (f"inv_continuity_{safe_len}_{safe_sn}.csv", "Inv Continuity CSV"),
-                (f"DCR_{safe_len}_{safe_sn}.csv", "DCR CSV"),
-                (f"inv_DCR_{safe_len}_{safe_sn}.csv", "Inv DCR CSV"),
-                (f"leakage_{safe_len}_{safe_sn}.csv", "Leakage CSV"),
-                (f"leakage_1s_{safe_len}_{safe_sn}.csv", "Leakage 1s CSV"),
-            ]
-
-            st.markdown("**Downloads**")
-            any_found = False
-            for fname, label in per_files:
-                temp_path = base_dir / fname
-                if temp_path.exists():
-                    any_found = True
-                    st.download_button(
-                        label=f"Download {label}",
-                        data=temp_path.read_bytes(),
-                        file_name=fname,
-                        mime="text/csv",
-                        key=widget_key("dl", safe_sn, fname),
-                    )
-            if not any_found:
-                st.caption("No temp CSVs found for this cable.")
 
         # ------------------------- MAPS COLUMN -------------------------
         with ccols[1]:
