@@ -1,7 +1,7 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="Tools Home", layout="wide")
+st.set_page_config(page_title="Tools Home", page_icon = "🏠", layout="wide")
 
 # ---------- Card styling for st.button ----------
 st.markdown("""
