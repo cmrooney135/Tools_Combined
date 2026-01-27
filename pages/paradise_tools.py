@@ -525,7 +525,7 @@ if uploaded_files:
         has_continuity = has_data(cables, "inv_continuity")
         if(has_continuity):
             inv_continuity_master = build_master_dataframe(cables, "inv_continuity")[0]
-            csv_str = continuity_master.to_csv(index=False)
+            csv_str = inv_continuity_master.to_csv(index=False)
             st.download_button(
                 label="Download Master Inv Continuity CSV",
                 data=csv_str,
@@ -903,7 +903,7 @@ if uploaded_files:
                 inv_DCR_master_failures.append(fail_df.copy())
 
             # Build master and plots (if we collected any failures)
-            if DCR_master_failures:
+            if inv_DCR_master_failures:
                 master_df = pd.concat(DCR_master_failures, ignore_index=True)
                 master_df["Category"] = master_df["Detail"].apply(bucket_reason)
 
