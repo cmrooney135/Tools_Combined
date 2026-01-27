@@ -9,63 +9,87 @@ from abc import ABC, abstractmethod
 
 from Test import Test
 
-@dataclass
-class Cable:
-    serial_number: str
-    length: int
 
-    # Dict: "continuity" -> [Test, Test, ...]
-    TESTS: Dict[str, List[Test]] = field(default_factory=lambda: {
+# Cable.py
+from dataclasses import dataclass, field
+from typing import List, Dict
+from Test import Test
+
+def _fresh_tests_dict() -> Dict[str, List[Test]]:
+    # Keep keys *lowercase* — add_test/get_tests lower-case the key
+    return {
         "continuity": [],
         "inv_continuity": [],
         "dcr": [],
         "inv_dcr": [],
         "leakage": [],
         "leakage_1s": [],
-    })
+        "si": [],   # <-- lower-case 'si'
+    }
 
-    # --- Defensive migration (handles legacy code that set TESTS = [] accidentally) ---
+@dataclass
+class Cable:
+    serial_number: str
+    length: int
+    TESTS: Dict[str, List[Test]] = field(default_factory=_fresh_tests_dict)
+
     def _ensure_tests_dict(self) -> None:
+        """
+        Migrate/initialize TESTS in all legacy states:
+          - missing attr
+          - None
+          - mistakenly a list of Test
+          - wrong/mixed-case keys
+          - missing standard buckets
+        """
+        # 1) TESTS missing or None → create fresh
+        if not hasattr(self, "TESTS") or self.TESTS is None:
+            self.TESTS = _fresh_tests_dict()
+            return
+
+        # 2) Legacy state where TESTS was a list of Test objects
         if isinstance(self.TESTS, list):
-            # Convert legacy list of Test into dict-of-lists by test_type
-            new_bucket: Dict[str, List[Test]] = {
-                "continuity": [],
-                "inv_continuity": [],
-                "dcr": [],
-                "inv_dcr": [],
-                "leakage": [],
-                "leakage_1s": [],
-            }
+            new_bucket = _fresh_tests_dict()
             for t in self.TESTS:
                 try:
-                    key = t.test_type.lower()
+                    key = getattr(t, "test_type", "") or ""
+                    key = key.lower() if isinstance(key, str) else "unknown"
                     new_bucket.setdefault(key, []).append(t)
                 except Exception:
-                    # Skip anything that isn't a Test or lacks test_type
                     pass
             self.TESTS = new_bucket
 
+        # 3) Normalize dict keys to lowercase
+        if not isinstance(self.TESTS, dict):
+            self.TESTS = _fresh_tests_dict()
+            return
+
+        self.TESTS = {str(k).lower(): v for k, v in self.TESTS.items()}
+
+        # 4) Ensure required buckets exist
+        for required in _fresh_tests_dict().keys():
+            self.TESTS.setdefault(required, [])
+
     def add_test(self, test: Test) -> None:
         self._ensure_tests_dict()
-        key = test.test_type.lower()
+        key = (getattr(test, "test_type", "") or "").lower()
         if key not in self.TESTS:
             self.TESTS[key] = []
         self.TESTS[key].append(test)
 
     def get_tests(self, test_type: str) -> List[Test]:
         self._ensure_tests_dict()
-        return self.TESTS.get(test_type.lower(), [])
+        return self.TESTS.get((test_type or "").lower(), [])
 
-    def latest_test(self, test_type: str) -> Optional[Test]:
-        tests = self.get_tests(test_type)
-        return tests[-1] if tests else None
+    def latest_test(self, test_type: str):
+        ts = self.get_tests(test_type)
+        return ts[-1] if ts else None
 
     def has_data(self, test_type: str, *, use_latest: bool = True) -> bool:
         if use_latest:
             t = self.latest_test(test_type)
             return (t is not None) and t.has_data()
         return any(t.has_data() for t in self.get_tests(test_type))
-
 
     # -----------------
     # Abstract API
@@ -107,8 +131,7 @@ class Cable:
     # -----------------
     # Common logic
     # -----------------
-    def add_test(self, test: Test) -> None:
-        self.TESTS.append(test)
+
 
     def tests_by_type(self, test_type: Test.TestType) -> List[Test]:
         return [t for t in self.TESTS if t.type == test_type]

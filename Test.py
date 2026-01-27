@@ -22,8 +22,9 @@ class Test:
     data: Optional[pd.DataFrame] = None
     failure_data: Optional[pd.DataFrame] = None
     
-    def __post_init__(self):
-        self.test_type = self.test_type.lower()
+    def __post_init__(self) -> None:
+        self.test_type = (self.test_type or "").lower()
+        self.result = (self.result or "").upper()
 
     def has_data(self) -> bool:
         return self.data is not None and not self.data.empty
