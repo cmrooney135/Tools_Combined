@@ -158,26 +158,42 @@ def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd
     if not hasattr(test_obj, "data") or not isinstance(test_obj.data, pd.DataFrame):
         st.error(f"Test.data missing or not a DataFrame for run '{source_name or ''}'")
         return pd.DataFrame()
+
     df = test_obj.data.copy()
     df.columns = [str(c).strip() for c in df.columns]
+
     ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
     print(ttype)
+
     if "Channel" not in df.columns:
         st.error(
             f"❌ DataFrame for run '{source_name or ''}' lacks required column 'Channel'. "
             f"Columns present: {list(df.columns)}"
         )
         return pd.DataFrame()
-    if "Measured_R (mOhm)" not in df.columns:
+
+    # ✅ More flexible measured-column resolution
+    measured_candidates = [
+        "Measured",                 # already normalized upstream
+        "Measured_R (mOhm)",        # resistance/continuity
+        "Measured_pA",          # leakage in microamps
+        "Measured_pA",          # leakage with mu-symbol
+        "Measured_I",               # generic current
+        "Value",                    # last resort, if your parser uses a generic name
+    ]
+    meas_col = next((c for c in measured_candidates if c in df.columns), None)
+    if not meas_col:
         st.error(
-            f"❌ DataFrame for run '{source_name or ''}' lacks required column 'Measured_R (mOhm)'. "
-            f"Columns present: {list(df.columns)}"
+            f"❌ DataFrame for run '{source_name or ''}' lacks a measurable column. "
+            f"Tried: {measured_candidates}. Columns present: {list(df.columns)}"
         )
         return pd.DataFrame()
+
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
-    cable_type = cable_obj.type
-    out = df.loc[:, ["Channel", "Measured_R (mOhm)"]].copy()
-    out.rename(columns={"Measured_R (mOhm)": "Measured"}, inplace=True)
+    cable_type = getattr(cable_obj, "type", None)
+
+    out = df.loc[:, ["Channel", meas_col]].copy()
+    out.rename(columns={meas_col: "Measured"}, inplace=True)
     out["TestType"] = ttype
     out["CableSerial"] = serial
     out["TestTime"] = test_time
@@ -480,7 +496,7 @@ if uploaded_files:
 # --------------------------
 # Download & Visuals (single family)
 # --------------------------
-TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance"]
+TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance", "leakage", "leakage_1s"]
 masters = st.session_state.get("masters_by_type", {})
 
 def render_single_family():
@@ -552,20 +568,7 @@ def render_single_family():
                         key=f"overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
                     )
                     overflow = None if overflow_val == 0 else overflow_val
-                with c3:
-                    log_x = st.checkbox(
-                        "Log X",
-                        value=False,
-                        key=f"logx_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY (you already had this in one place)
-                    )
-                with c4:
-                    run_options = sorted(df_ct["RunHeader"].dropna().astype(str).unique().tolist())
-                    sel_run = st.selectbox(
-                        "Run for per‑channel histogram",
-                        options=run_options if run_options else ["(none)"],
-                        index=len(run_options)-1 if run_options else 0,
-                        key=f"sel_run_{CABLE_FAMILY}_{ttype}"   # <-- UNIQUE KEY (you had this already)
-                    )
+
 
                 # Build data sources
                 df_ct_clean = _df_for(ttype, CABLE_FAMILY)
@@ -578,7 +581,6 @@ def render_single_family():
                         bin_size=bin_size if bin_size and bin_size > 0 else None,
                         overflow=overflow,
                         x_label="Max Measured (per run)",
-                        log_x=log_x,
                     )
                     st.plotly_chart(figA, width="stretch")    # <-- was use_container_width=True
                 else:

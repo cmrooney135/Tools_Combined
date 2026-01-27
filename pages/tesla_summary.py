@@ -1,4 +1,5 @@
 import streamlit as st
+# app.py — Paradise-only
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -37,11 +38,11 @@ ensure_state()
 # --------------------------
 # Single-family selector
 # --------------------------
-CABLE_FAMILY = "tesla"  
+CABLE_FAMILY = "tesla"  # <---- Set to "tesla" in this version
 
 # --- Session state init (call this FIRST) ---
 def init_state():
-    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon = "📈", layout="wide")
+    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon= "📊", layout="wide")
 
     # Core containers
     st.session_state.setdefault("cables", [])
@@ -59,7 +60,7 @@ def init_state():
 
 init_state()
 
-st.title(f"Cable Summary — {CABLE_FAMILY.capitalize()}")
+st.title(f"Summary — {CABLE_FAMILY.capitalize()}")
 
 # ---------- ALWAYS RENDER THE UPLOADER ----------
 uploaded_files = st.file_uploader(
@@ -157,25 +158,42 @@ def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd
     if not hasattr(test_obj, "data") or not isinstance(test_obj.data, pd.DataFrame):
         st.error(f"Test.data missing or not a DataFrame for run '{source_name or ''}'")
         return pd.DataFrame()
+
     df = test_obj.data.copy()
     df.columns = [str(c).strip() for c in df.columns]
+
     ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
+    print(ttype)
+
     if "Channel" not in df.columns:
         st.error(
             f"❌ DataFrame for run '{source_name or ''}' lacks required column 'Channel'. "
             f"Columns present: {list(df.columns)}"
         )
         return pd.DataFrame()
-    if "Measured_R (mOhm)" not in df.columns:
+
+    # ✅ More flexible measured-column resolution
+    measured_candidates = [
+        "Measured",                 # already normalized upstream
+        "Measured_R (mOhm)",        # resistance/continuity
+        "Measured_pA",          # leakage in microamps
+        "Measured_pA",          # leakage with mu-symbol
+        "Measured_I",               # generic current
+        "Value",                    # last resort, if your parser uses a generic name
+    ]
+    meas_col = next((c for c in measured_candidates if c in df.columns), None)
+    if not meas_col:
         st.error(
-            f"❌ DataFrame for run '{source_name or ''}' lacks required column 'Measured_R (mOhm)'. "
-            f"Columns present: {list(df.columns)}"
+            f"❌ DataFrame for run '{source_name or ''}' lacks a measurable column. "
+            f"Tried: {measured_candidates}. Columns present: {list(df.columns)}"
         )
         return pd.DataFrame()
+
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
-    cable_type = cable_obj.type
-    out = df.loc[:, ["Channel", "Measured_R (mOhm)"]].copy()
-    out.rename(columns={"Measured_R (mOhm)": "Measured"}, inplace=True)
+    cable_type = getattr(cable_obj, "type", None)
+
+    out = df.loc[:, ["Channel", meas_col]].copy()
+    out.rename(columns={meas_col: "Measured"}, inplace=True)
     out["TestType"] = ttype
     out["CableSerial"] = serial
     out["TestTime"] = test_time
@@ -193,6 +211,7 @@ def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = Non
     if "Detail" not in df.columns:
         return pd.DataFrame()
     ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
+    print(ttype)
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
     cable_type = getattr(cable_obj, "type", None)
     out = pd.DataFrame()
@@ -217,12 +236,16 @@ def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = Non
 
 def add_failures_minimal(cable_obj, test_obj, run_header: str | None = None, source_name: str | None = None):
     norm = normalize_failures_minimal(cable_obj, test_obj, run_header=run_header, source_name=source_name)
+    print("----------------failure data-------------------")
+    print(norm)
     if norm.empty:
         return
     ttype = norm["TestType"].iloc[0] if "TestType" in norm.columns else (
         (getattr(test_obj, "type", None) or getattr(test_obj, "name", None) or "unknown").strip().lower()
     )
+    print(ttype)
     failures = st.session_state.setdefault("failures_by_type", {})
+
     failures.setdefault(ttype, pd.DataFrame())
     df0 = failures[ttype]
     merged = pd.concat([df0, norm], ignore_index=True)
@@ -286,7 +309,7 @@ def add_to_master_minimal(cable_obj, test_obj, source_name: str | None = None) -
     if "TestType" in norm.columns and pd.notna(norm["TestType"]).any():
         ttype = str(norm["TestType"].iloc[0]).strip().lower()
     else:
-        ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
+        ttype = (getattr(test_obj, "type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
     serial = norm["CableSerial"].iloc[0] if "CableSerial" in norm.columns else None
     t = norm["TestTime"].iloc[0] if "TestTime" in norm.columns else None
 
@@ -473,9 +496,8 @@ if uploaded_files:
 # --------------------------
 # Download & Visuals (single family)
 # --------------------------
-TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance"]
+TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance", "leakage", "leakage_1s"]
 masters = st.session_state.get("masters_by_type", {})
-
 
 def render_single_family():
     st.markdown(f"### {CABLE_FAMILY.capitalize()}")
@@ -546,20 +568,7 @@ def render_single_family():
                         key=f"overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
                     )
                     overflow = None if overflow_val == 0 else overflow_val
-                with c3:
-                    log_x = st.checkbox(
-                        "Log X",
-                        value=False,
-                        key=f"logx_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY (you already had this in one place)
-                    )
-                with c4:
-                    run_options = sorted(df_ct["RunHeader"].dropna().astype(str).unique().tolist())
-                    sel_run = st.selectbox(
-                        "Run for per‑channel histogram",
-                        options=run_options if run_options else ["(none)"],
-                        index=len(run_options)-1 if run_options else 0,
-                        key=f"sel_run_{CABLE_FAMILY}_{ttype}"   # <-- UNIQUE KEY (you had this already)
-                    )
+
 
                 # Build data sources
                 df_ct_clean = _df_for(ttype, CABLE_FAMILY)
@@ -572,7 +581,6 @@ def render_single_family():
                         bin_size=bin_size if bin_size and bin_size > 0 else None,
                         overflow=overflow,
                         x_label="Max Measured (per run)",
-                        log_x=log_x,
                     )
                     st.plotly_chart(figA, width="stretch")    # <-- was use_container_width=True
                 else:
@@ -581,6 +589,8 @@ def render_single_family():
                 # --- Failures ---
                 st.markdown("**Failure breakdown**")
                 failures_all = st.session_state.get("failures_by_type", {}).get(ttype, pd.DataFrame())
+                print("----------------failure data-------------------")
+                print(failures_all)
                 if failures_all.empty or "Category" not in failures_all.columns:
                     st.info("No failure records available yet.")
                 else:
