@@ -100,13 +100,19 @@ UNIT_TO_MOHM = {
 }
 
 def is_continuity(testname):
+    print(testname)
+    print("continuity" in testname.lower())
+    print("inv" in testname.lower())
+    print("continuity" or "conitnuity" in testname.lower() and "inv" not in testname.lower())
     if("continuity" or "conitnuity" in testname.lower() and "inv" not in testname.lower()):
         return True
     else: 
         return False
 
 def is_inv_continuity(testname):
-    if("continuity" in testname.lower() and "inv" in testname.lower()):
+
+    if("continuity" or "continuity" in testname.lower() and "inv" in testname.lower()):
+        print("is inverse continuity")
         return True
     else:
         return False
@@ -548,6 +554,7 @@ def process_csv(
             df_extracted.to_csv(filtered_path, index=False)
             df_errors_extracted.to_csv(errors_path, index = False)
         elif(is_continuity(test_name)):
+            print("inside is continuity")
             filtered_name = f"continuity_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"continuity_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -567,6 +574,7 @@ def process_csv(
             df_errors_extracted.to_csv(errors_path, index = False)
             type = "Continuity"
         elif(is_inv_continuity(test_name)):
+            print("hello inverse continuity")
             filtered_name = f"inv_continuity_{cable.length}_{cable.serial_number}.csv"
             errors_name = f"inv_continuity_{cable.length}_{cable.serial_number}_errors.csv"
 
@@ -580,6 +588,7 @@ def process_csv(
             filtered_path.mkdir(parents=True, exist_ok=True)
             errors_path = filtered_path / errors_name
             filtered_path = filtered_path / filtered_name
+            print(filtered_path)
            
             test.data = df_extracted
             test.failure_data = df_errors_extracted

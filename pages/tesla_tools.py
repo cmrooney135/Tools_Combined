@@ -522,10 +522,10 @@ if uploaded_files:
 
     with Inverse_Continuity_Tab:
         st.subheader("Inverse Continuity")
-        has_continuity = has_data(cables, "inv_continuity")
-        if(has_continuity):
+        has_inv_continuity = has_data(cables, "inv_continuity")
+        if(has_inv_continuity):
             inv_continuity_master = build_master_dataframe(cables, "inv_continuity")[0]
-            csv_str = continuity_master.to_csv(index=False)
+            csv_str = inv_continuity_master.to_csv(index=False)
             st.download_button(
                 label="Download Master Inv Continuity CSV",
                 data=csv_str,
@@ -571,7 +571,6 @@ if uploaded_files:
 
         header_cols = st.columns(COL_LAYOUT)
 
-        header_cols = st.columns(COL_LAYOUT)
 
         st.subheader("Processed Cables")
 
@@ -681,7 +680,6 @@ if uploaded_files:
             base_dir = Path("temp") / "tesla"/ safe_len / safe_sn
             name = f"inv_continuity_{safe_len}_{safe_sn}.csv"
             temp_path =  base_dir / name
-
             if temp_path.exists():
                 cols[3].download_button(
                     label="Download CSV",
