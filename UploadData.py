@@ -100,10 +100,6 @@ UNIT_TO_MOHM = {
 }
 
 def is_continuity(testname):
-    print(testname)
-    print("continuity" in testname.lower())
-    print("inv" in testname.lower())
-    print("continuity" or "conitnuity" in testname.lower() and "inv" not in testname.lower())
     if("continuity" or "conitnuity" in testname.lower() and "inv" not in testname.lower()):
         return True
     else: 
@@ -292,6 +288,7 @@ def process_csv(
 
     # Normalize a test "kind" if you want to use controlled values
     def _kind_from_name(name: str) -> Optional[str]:
+        print(name)
         if is_1s_leakage(name):      return "leakage_1s"
         if is_leakage(name):         return "leakage"
         if is_inv_resistance(name):  return "inv_resistance"

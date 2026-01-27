@@ -192,7 +192,7 @@ def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = Non
     df.columns = [str(c).strip() for c in df.columns]
     if "Detail" not in df.columns:
         return pd.DataFrame()
-    ttype = (getattr(test_obj, "type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
+    ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
     cable_type = getattr(cable_obj, "type", None)
     out = pd.DataFrame()
@@ -286,7 +286,7 @@ def add_to_master_minimal(cable_obj, test_obj, source_name: str | None = None) -
     if "TestType" in norm.columns and pd.notna(norm["TestType"]).any():
         ttype = str(norm["TestType"].iloc[0]).strip().lower()
     else:
-        ttype = (getattr(test_obj, "type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
+        ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
     serial = norm["CableSerial"].iloc[0] if "CableSerial" in norm.columns else None
     t = norm["TestTime"].iloc[0] if "TestTime" in norm.columns else None
 
