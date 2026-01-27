@@ -7,10 +7,12 @@ from typing import Tuple, Optional, List, Any
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
 
 
 import numpy as np
+@dataclass
 class Paradise(Cable):
     #Channel ORDERS GO HERE
     p1_first_row  = [f"E{i}P2" for i in range(87, 0, -1)]

@@ -6,7 +6,7 @@ import csv
 from Cable import Cable
 import io
 
-from cable_factory import create_cable
+from cable_factory import create_cable, create_golden_cable
 
 import re
 from typing import Dict, Optional, Tuple, List, Any
@@ -236,6 +236,7 @@ def process_csv(
     test_time_s = _get_header_value("Test Time")
     retry_count_s = _get_header_value("Retry Count")
     operator = _get_header_value("Operator")
+    test_name = _get_header_value("Test Name")
 
     def _to_int_safe(s):
         try:
@@ -254,7 +255,7 @@ def process_csv(
     for line in header_lines:
         if line.strip().startswith("S/N:"):
             serial_number = line.split(",", 1)[1].strip()
-            if "0" not in serial_number:
+            if "0" not in serial_number and not (serial_number.lower() == "golden"):
                 return None, None
             serial_norm = serial_number.strip().upper()
             cable_sn = serial_norm
@@ -266,13 +267,18 @@ def process_csv(
                 None
             )
             if cable is None:
-                
                 try:
-                    cable = create_cable(serial_norm)
+                    if(serial_number.lower() == "golden"):
+                        cable= create_golden_cable(test_name)
+                        print(cable)
+                        print(cables)
+                    else:
+                        cable = create_cable(serial_norm)
                 except ValueError as e:
                     return None, None
 
                 cables.append(cable)
+
 
 
         m = test_name_pattern.search(line)

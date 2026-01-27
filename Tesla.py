@@ -9,8 +9,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from collections import OrderedDict, defaultdict
 import numpy as np
-
-
+from dataclasses import dataclass
+@dataclass
 class Tesla(Cable):
     #Channel ORDERS GO HERE
     p1_first_row  = [f"E{i}P1" for i in range(87, 0, -1)]
