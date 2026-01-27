@@ -41,7 +41,7 @@ CABLE_FAMILY = "tesla"
 
 # --- Session state init (call this FIRST) ---
 def init_state():
-    st.set_page_config(page_title=f"Cable Test Ingest · {CABLE_FAMILY.capitalize()}", layout="wide")
+    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon = "📈", layout="wide")
 
     # Core containers
     st.session_state.setdefault("cables", [])
@@ -59,7 +59,7 @@ def init_state():
 
 init_state()
 
-st.title(f"Cable Test Ingest — {CABLE_FAMILY.capitalize()}")
+st.title(f"Cable Summary — {CABLE_FAMILY.capitalize()}")
 
 # ---------- ALWAYS RENDER THE UPLOADER ----------
 uploaded_files = st.file_uploader(
@@ -470,22 +470,9 @@ if uploaded_files:
             st.session_state["processed_files"] = processed
 
 
-with st.expander("Debug: ingest status", expanded=False):
-    st.write("Processed files (session_state['processed_files']):", list(st.session_state.get("processed_files", [])))
-    masters = st.session_state.get("masters_by_type", {})
-    for ttype, df in masters.items():
-        st.write(f"TestType = {ttype!r}, rows = {len(df)}")
-        if not df.empty:
-            st.write("  Columns:", list(df.columns))
-            st.write("  Sample:", df.head(3))
-    failures = st.session_state.get("failures_by_type", {})
-    for ttype, df in failures.items():
-        st.write(f"Failures[{ttype!r}] rows = {len(df)}")
-
 # --------------------------
 # Download & Visuals (single family)
 # --------------------------
-st.subheader("Download Master CSVs")
 TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance"]
 masters = st.session_state.get("masters_by_type", {})
 
