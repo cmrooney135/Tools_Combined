@@ -47,14 +47,28 @@ with tesla_col:
 
     if st.button("📈  Tesla Summary\nSummary statistics and overview histograms for DCR and continuity.",
                  use_container_width=True, key="tesla_summary"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
         st.switch_page("pages/tesla_summary.py")
 
     if st.button("🛠️  Tesla Tools\nHeatmaps and defect maps for any number of Tesla cables (high-click version).",
                  use_container_width=True, key="tesla_tools"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/tesla_tools.py")
 
     if st.button("🧹  Tesla Tools (operator version)\nHeatmaps and defect maps for any number of Tesla cables (low-click version)",
                  use_container_width=True, key="tesla_ops"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/tesla_tools_few_clicks.py")
 
 # --- PARADISE ---
@@ -63,18 +77,37 @@ with paradise_col:
 
     if st.button("📈  Paradise Summary\nSummary statistics and overview histograms for DCR and continuity.",
                  use_container_width=True, key="paradise_summary"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/paradise_summary.py")
 
     if st.button("🛠️  Paradise Tools\nHeatmaps and defect maps for any number of paradise cables (high-click version)",
                  use_container_width=True, key="paradise_tools"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/paradise_tools.py")
 
     if st.button("🧹  Paradise Tools (operator version)\nHeatmaps and defect maps for any number of paradise cables (low-click version)",
                  use_container_width=True, key="paradise_ops"):
+        
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/paradise_tools_few_clicks.py")
 
     # --- NEW: SI Tools button ---
     if st.button("🐍  SI Tools\nSignal Integrity analysis and utilities for Paradise cables.",
                  use_container_width=True, key="paradise_si_tools"):
-        # Adjust the path below if your SI tools page has a different filename or location
+            
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
         st.switch_page("pages/paradise_SI.py")
