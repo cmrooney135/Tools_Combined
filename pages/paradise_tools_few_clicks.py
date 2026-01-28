@@ -22,7 +22,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
-top_bar(page_icon="🧹", title="🏝️Paradise Tools", home_page_path="Home.py")
+top_bar(page_icon="🧹", title="🏝️Paradise Tools (developer version)", home_page_path="Home.py")
 
 import os
 import re

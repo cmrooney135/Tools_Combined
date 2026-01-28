@@ -736,7 +736,45 @@ class Paradise(Cable):
                     itemwidth=30,
                 )
             )
+            y2_bottom, y2_top = fig.layout.yaxis2.domain
 
+            top_y = y2_top + 0.02
+            bot_y = y2_bottom - 0.02
+
+            arrow_end = max(dib_xticks)   
+            arrow_start = dib_xticks[-15]
+
+            fig.add_annotation(
+                x=arrow_end,
+                y=top_y,
+                ax=arrow_start,
+                ay=0,               
+                xref="x2",
+                yref="paper",
+                axref="x2",
+                ayref="pixel",
+                showarrow=True,
+                arrowhead=3,
+                arrowwidth=2,
+                arrowcolor="blue",
+                text=""
+            )
+
+            fig.add_annotation(
+                x=arrow_end,
+                y=bot_y,
+                ax=arrow_start,
+                ay=0,
+                xref="x2",
+                yref="paper",
+                axref="x2",
+                ayref="pixel",
+                showarrow=True,
+                arrowhead=3,
+                arrowwidth=2,
+                arrowcolor="blue",
+                text=""
+            )
             fig.update_yaxes(title_text="P2", row=1, col=1)
             fig.update_yaxes(title_text="DIB", row=2, col=1)
             fig.update_yaxes(title_text="P1", row=3, col=1)
@@ -915,7 +953,45 @@ class Paradise(Cable):
                     ),
                 )
 
+                y2_bottom, y2_top = fig.layout.yaxis2.domain
 
+                top_y = y2_top + 0.02
+                bot_y = y2_bottom - 0.02
+
+                arrow_end = max(dib_xticks)   
+                arrow_start = dib_xticks[-15]
+
+                fig.add_annotation(
+                    x=arrow_end,
+                    y=top_y,
+                    ax=arrow_start,
+                    ay=0,               
+                    xref="x2",
+                    yref="paper",
+                    axref="x2",
+                    ayref="pixel",
+                    showarrow=True,
+                    arrowhead=3,
+                    arrowwidth=2,
+                    arrowcolor="blue",
+                    text=""
+                )
+
+                fig.add_annotation(
+                    x=arrow_end,
+                    y=bot_y,
+                    ax=arrow_start,
+                    ay=0,
+                    xref="x2",
+                    yref="paper",
+                    axref="x2",
+                    ayref="pixel",
+                    showarrow=True,
+                    arrowhead=3,
+                    arrowwidth=2,
+                    arrowcolor="blue",
+                    text=""
+                )
                 fig.update_yaxes(
                     title_text="DIB",
                     row=2, col=1

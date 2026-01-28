@@ -33,7 +33,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
-top_bar(page_icon="📈", title="🏝️Summary — {CABLE_FAMILY.capitalize()}", home_page_path="Home.py")
+top_bar(page_icon="📈", title="🏝️Paradise Summary ", home_page_path="Home.py")
 
 
 
@@ -44,7 +44,6 @@ CABLE_FAMILY = "paradise"  # <---- Set to "paradise" in this version
 
 # --- Session state init (call this FIRST) ---
 def init_state():
-    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon= "📈", layout="wide")
 
     # Core containers
     st.session_state.setdefault("cables", [])
@@ -62,7 +61,6 @@ def init_state():
 
 init_state()
 
-st.title(f"📈🏝️Summary — {CABLE_FAMILY.capitalize()}")
 
 # ---------- ALWAYS RENDER THE UPLOADER ----------
 uploaded_files = st.file_uploader(

@@ -39,7 +39,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
-top_bar(page_icon="🛠️", title="🏝️Paradise Tools (developer version)", home_page_path="Home.py")
+top_bar(page_icon="🛠️", title="🏝️Paradise Tools", home_page_path="Home.py")
 
 def _to_list(x):
     if x is None:
@@ -314,7 +314,6 @@ def build_master_dataframe(cables: dict, attr_name: str, *, pair_delim: str = "|
 
 st.set_page_config(page_title="Paradise Tools", page_icon="🛠️", layout="wide")
 
-st.title("🏝️🛠️Paradise Tools")
 uploaded_files = st.file_uploader("Upload your CSV files", type="csv", accept_multiple_files=True)
 
 pattern = re.compile(r"(?<![A-Za-z0-9])0[0-4][A-Za-z0-9]{8}(?![A-Za-z0-9])", re.IGNORECASE)
