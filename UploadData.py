@@ -99,40 +99,29 @@ UNIT_TO_MOHM = {
     "uohm": 1e-3, "microohm": 1e-3, "microohms": 1e-3  # µΩ → mOhm
 }
 
-def is_continuity(testname):
-    if("continuity" or "conitnuity" in testname.lower() and "inv" not in testname.lower()):
-        return True
-    else: 
-        return False
+def is_continuity(testname: str) -> bool:
+    s = testname.lower()
+    return (("continuity" in s or "conitnuity" in s)  
+            and "inv" not in s)
 
-def is_inv_continuity(testname):
+def is_inv_continuity(testname: str) -> bool:
+    s = testname.lower()
+    return ("continuity" in s and "inv" in s)
+def is_leakage(testname: str) -> bool:
+    s = testname.lower()
+    return ("leakage" in s) and ("1s" not in s)
 
-    if("continuity" or "continuity" in testname.lower() and "inv" in testname.lower()):
-        return True
-    else:
-        return False
+def is_1s_leakage(testname: str) -> bool:
+    s = testname.lower()
+    return ("leakage" in s) and ("1s" in s)
 
-def is_leakage(testname):
-    if("leakage" in testname.lower() and not "1s" in testname.lower()):
-        return True
-    else:
-        return False
-def is_1s_leakage(testname):
-    if("leakage" in testname.lower() and "1s" in testname.lower()):
-        return True
-    else:
-        return False
-def is_resistance(testname):
-    if("resistance" in testname.lower() and "inv" not in testname.lower()):
-        return True
-    else:
-        return False
+def is_resistance(testname: str) -> bool:
+    s = testname.lower()
+    return ("resistance" in s) and ("inv" not in s)
 
-def is_inv_resistance(testname):
-    if("resistance" in testname.lower() and "inv" in testname.lower()):
-        return True
-    else:
-        return False
+def is_inv_resistance(testname: str) -> bool:
+    s = testname.lower()
+    return ("resistance" in s) and ("inv" in s)
 def parse_ohms(text):
     """
     Parse a string for resistance values in ohms (Ω, ohm, kohm, mohm, uohm).

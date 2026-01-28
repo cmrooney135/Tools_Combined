@@ -53,10 +53,12 @@ def init_state():
         "inv_continuity": pd.DataFrame(),
         "resistance": pd.DataFrame(),
         "inv_resistance": pd.DataFrame(),
+        "leakage": pd.DataFrame(),
+        "leakage_1s": pd.DataFrame(),
     })
     st.session_state.setdefault("failures_by_type", {})
     st.session_state.setdefault("_seen_run_headers", set())
-    for ttype in ["continuity", "inv_continuity", "resistance", "inv_resistance"]:
+    for ttype in ["continuity", "inv_continuity", "resistance", "inv_resistance", "leakage", "leakage_1s"]:
         st.session_state.setdefault(f"_run_ctr_{ttype}", 0)
 
 init_state()
