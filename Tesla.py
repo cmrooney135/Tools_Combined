@@ -63,6 +63,29 @@ class Tesla(Cable):
         r'(?P<left>[A-Z]+\d+)\s*-\s*(?P<right>[A-Z0-9]+)\s*\(\s*(?P<paren>[A-Z]*\d+)[^)]*\)',
         re.I
     )
+    def parse_channel(self, channel: str):
+        if not isinstance(channel, str):
+            return None, None, None
+
+        s = channel.strip().upper()
+
+        # Pattern:
+        #   Row: single letter A–Z (you can restrict to A–E if you want)
+        #   Pin: one or more digits
+        #   Panel: exactly 'DIB' or 'P1' or 'P2'
+        m = re.match(r'^([A-Z])\s*0*([0-9]+)\s*(DIB|P1|P2)$', s)
+        if not m:
+            return None, None, None
+
+        row = m.group(1)
+        pin = int(m.group(2))          # handles leading zeros gracefully
+        panel = m.group(3)
+
+        # Optional: enforce expected row set
+        # if row not in {'A','B','C','D','E'}:
+        #     return None, None, None
+
+        return row, pin, panel
 
     def extract_channel(self, text: str) -> Tuple[str, ...]:
         """
