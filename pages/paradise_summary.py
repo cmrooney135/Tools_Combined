@@ -596,14 +596,14 @@ def render_single_family():
                             "Bin size",
                             min_value=0.0, value=0.0, step=0.0,
                             help="Set to 0 for auto binning. Units match the 'Measured' column.",
-                            key=f"bin_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY
+                            key=f"all_bin_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY
                         )
                     with c2:
                         overflow_val = st.number_input(
                             "Overflow threshold",
                             min_value=0.0, value=0.0, step=0.0,
                             help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
-                            key=f"overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
+                            key=f"all_overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
                         )
                     overflow = None if overflow_val == 0 else overflow_val
                     st.caption(f"All measurements combined: {len(all_vals):,} points")
