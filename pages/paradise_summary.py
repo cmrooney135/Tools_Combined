@@ -149,7 +149,6 @@ def _classify_failure(detail: str) -> str:
         (r"\bmis[-\s]?wire\b|\bswapp?ed\b|\bwrong\s*wire\b", "Miswire"),
         (r"\breverse(d)?\b|\bpolarity\b", "Reverse"),
         (r"\bleak(age)?\b", "Leakage"),
-
         (r"\b(?:high|low)[\s\-:]*res(?:is(?:tance)?)?\b|\bout[\s\-]*of[\s\-]*specs?\b", "Resistance OOS"),
     ]
     for pat, cat in patterns:

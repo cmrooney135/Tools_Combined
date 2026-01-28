@@ -313,7 +313,7 @@ def build_master_dataframe(cables: dict, attr_name: str, *, pair_delim: str = "|
 
 
 
-st.set_page_config(page_title="Tesla Tools", page_icon = "🧹", layout="wide")
+st.set_page_config(page_title="Tesla Tools", page_icon = "🛠️", layout="wide")
 
 uploaded_files = st.file_uploader("Upload your CSV files", type="csv", accept_multiple_files=True)
 

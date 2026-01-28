@@ -13,11 +13,11 @@ from dataclasses import dataclass
 @dataclass
 class Tesla(Cable):
     #Channel ORDERS GO HERE
-    p1_first_row  = [f"E{i}P1" for i in range(87, 0, -1)]
-    p1_second_row = [f"D{i}P1" for i in range(87, 0, -1)]
+    p1_first_row  = [f"A{i}P1" for i in range(87, 0, -1)]
+    p1_second_row = [f"B{i}P1" for i in range(87, 0, -1)]
     p1_third_row  = [f"C{i}P1" for i in range(87, 0, -1)]
-    p1_fourth_row = [f"B{i}P1" for i in range(87, 0, -1)]
-    p1_fifth_row  = [f"A{i}P1" for i in range(87, 0, -1)]
+    p1_fourth_row = [f"D{i}P1" for i in range(87, 0, -1)]
+    p1_fifth_row  = [f"E{i}P1" for i in range(87, 0, -1)]
 
 
     dib_first_row  = [f"A{i}DIB" for i in range(1, 88)]
@@ -833,10 +833,11 @@ class Tesla(Cable):
 
         p2_row_letters = list("EDCBA")
         p2_grid, p2_xticks = self._grid_from(p2_vals, self.p2_order, p2_row_letters)
+        
         p2_grid = np.array(p2_grid, dtype=float, copy=True)
-        p2_grid[1:4, :] = p2_grid[0, :]  # D,C,B,A <- A; E (row 0) stays standalone
+        p2_grid[1:4, :] = p2_grid[4, :]
 
-        #p2_grid[1:4, :] = p2_grid[0, :]  # D,C,B,A <- A; E (row 0) stays standalone
+
         if zmin is None or zmax is None:
             all_vals = []
             for arr in (dib_vals, p1_vals, p2_vals):
