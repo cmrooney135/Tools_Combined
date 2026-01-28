@@ -589,7 +589,21 @@ def render_single_family():
                     st.plotly_chart(figA, width="stretch")    # <-- was use_container_width=True
                 else:
                     st.info("No runs available for the max-per-run histogram.")
+                # --- All measurements combined histogram ---
+                if not df_ct_clean.empty:
+                    all_vals = df_ct_clean["Measured"].to_numpy()
 
+                    st.caption(f"All measurements combined: {len(all_vals):,} points")
+                    figB = _hist(
+                        data=all_vals,
+                        title=f"{CABLE_FAMILY.capitalize()} · {ttype} — All measurements (combined)",
+                        bin_size=bin_size if bin_size and bin_size > 0 else None,
+                        overflow=overflow,
+                        x_label="Measured",
+                    )
+                    st.plotly_chart(figB, width="stretch")  # <-- was use_container_width=True
+                else:
+                    st.info("No raw measurements available to build the combined histogram.")
                 # --- Failures ---
                 st.markdown("**Failure breakdown**")
                 failures_all = st.session_state.get("failures_by_type", {}).get(ttype, pd.DataFrame())
