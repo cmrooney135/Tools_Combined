@@ -9,7 +9,7 @@ import ast
 import re
 import pandas as pd
 from typing import Optional, Tuple
-
+from _shared_ui import top_bar
 from pathlib import Path
 
 import os, tempfile
@@ -39,6 +39,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
+top_bar(page_icon="🛠️", title="🏝️Paradise Tools (developer version)", home_page_path="Home.py")
 
 def _to_list(x):
     if x is None:

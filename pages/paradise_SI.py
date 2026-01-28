@@ -4,7 +4,7 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 import streamlit as st
-
+from _shared_ui import top_bar
 from UploadSIData import process_SI_file
 def ensure_state():
     # Lists to hold your domain objects
@@ -27,6 +27,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
+top_bar(page_icon="🐍", title="🏝️SI Tools", home_page_path="Home.py")
 
 import pandas as pd
 import numpy as np
@@ -204,7 +205,6 @@ def _histogram(values_df: pd.DataFrame, title: str, x_label: str = "Impedance"):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-st.title("🐍🏝️SI Tools - Paradise ")
 st.set_page_config(page_title="SI Tools", page_icon = "🐍", layout="wide")
 uploaded_files = st.file_uploader("Upload your SI files", type="DAT", accept_multiple_files=True)
 

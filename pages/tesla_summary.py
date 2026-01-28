@@ -6,7 +6,7 @@ import numpy as np
 import re
 from pathlib import Path
 import plotly.express as px
-
+from _shared_ui import top_bar
 from Cable import Cable
 from Test import Test
 from UploadData import process_csv
@@ -33,6 +33,7 @@ def ensure_state():
 
 ensure_state()
 
+top_bar(page_icon="📈", title="⚡Tesla Summary", home_page_path="Home.py")
 
 
 # --------------------------
@@ -60,7 +61,6 @@ def init_state():
 
 init_state()
 
-st.title(f"📈⚡Summary — {CABLE_FAMILY.capitalize()}")
 
 # ---------- ALWAYS RENDER THE UPLOADER ----------
 uploaded_files = st.file_uploader(

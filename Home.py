@@ -1,8 +1,9 @@
 
 import streamlit as st
+from _shared_ui import top_bar
 
 st.set_page_config(page_title="Tools Home", page_icon="🏠", layout="wide")
-
+top_bar(page_icon="🏠", title="PTL Cable Tools Home", home_page_path="Home.py")
 # ---------- Card styling for st.button ----------
 st.markdown("""
 <style>
@@ -34,22 +35,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("PTL Cable Tools Home")
-st.write("")
 
-# ---------- Centered Home ----------
-l, c, r = st.columns([1, 2, 1])
-with c:
-    st.markdown(
-        '<div style="display:flex;flex-direction:column;align-items:center;">'
-        '<div style="font-size:40px;line-height:1;margin-bottom:6px;">🏠</div>'
-        '</div>', unsafe_allow_html=True
-    )
-    # Entire card clickable
-    if st.button("Home\nOverview and entry point for all PTL cable tools.", use_container_width=True, key="home"):
-        st.switch_page("Home.py")
 
-st.write("---")
 
 # ---------- Two Columns: Tesla (left) | Paradise (right) ----------
 tesla_col, paradise_col = st.columns(2)

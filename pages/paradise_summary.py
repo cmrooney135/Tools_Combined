@@ -9,6 +9,7 @@ import plotly.express as px
 
 from Cable import Cable
 from Test import Test
+from _shared_ui import top_bar
 from UploadData import process_csv
 # --- Session-state initialization (must run before using keys) ---
 def ensure_state():
@@ -32,6 +33,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
+top_bar(page_icon="📈", title="🏝️Summary — {CABLE_FAMILY.capitalize()}", home_page_path="Home.py")
 
 
 

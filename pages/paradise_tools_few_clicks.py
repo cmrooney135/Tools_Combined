@@ -1,4 +1,5 @@
 import streamlit as st
+from _shared_ui import top_bar
 # --- Session-state initialization (must run before using keys) ---
 def ensure_state():
     # Lists to hold your domain objects
@@ -21,6 +22,7 @@ def ensure_state():
     st.session_state.setdefault("leakage_1s_defects", {})
 
 ensure_state()
+top_bar(page_icon="🧹", title="🏝️Paradise Tools", home_page_path="Home.py")
 
 import os
 import re
@@ -455,7 +457,7 @@ def _run_id(test):
 # Streamlit UI
 # =============================================================================
 st.set_page_config(page_title="Paradise Tools", page_icon = "🧹", layout="wide")
-st.title("🧹🏝️Paradise Tools")
+
 
 uploaded_files = st.file_uploader("Upload your CSV files", type="csv", accept_multiple_files=True)
 
