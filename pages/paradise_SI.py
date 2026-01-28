@@ -204,7 +204,7 @@ def _histogram(values_df: pd.DataFrame, title: str, x_label: str = "Impedance"):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-st.title("SI Tools - Paradise ")
+st.title("🐍🏝️SI Tools - Paradise ")
 st.set_page_config(page_title="SI Tools", page_icon = "🐍", layout="wide")
 uploaded_files = st.file_uploader("Upload your SI files", type="DAT", accept_multiple_files=True)
 

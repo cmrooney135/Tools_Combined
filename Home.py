@@ -1,7 +1,7 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="Tools Home", page_icon = "🏠", layout="wide")
+st.set_page_config(page_title="Tools Home", page_icon="🏠", layout="wide")
 
 # ---------- Card styling for st.button ----------
 st.markdown("""
@@ -40,9 +40,11 @@ st.write("")
 # ---------- Centered Home ----------
 l, c, r = st.columns([1, 2, 1])
 with c:
-    st.markdown('<div style="display:flex;flex-direction:column;align-items:center;">'
-                '<div style="font-size:40px;line-height:1;margin-bottom:6px;">🏠</div>'
-                '</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="display:flex;flex-direction:column;align-items:center;">'
+        '<div style="font-size:40px;line-height:1;margin-bottom:6px;">🏠</div>'
+        '</div>', unsafe_allow_html=True
+    )
     # Entire card clickable
     if st.button("Home\nOverview and entry point for all PTL cable tools.", use_container_width=True, key="home"):
         st.switch_page("Home.py")
@@ -64,23 +66,28 @@ with tesla_col:
                  use_container_width=True, key="tesla_tools"):
         st.switch_page("pages/tesla_tools.py")
 
-    if st.button("⚡  Tesla Tools (operator version)\nHeatmaps and defect maps for any number of Tesla cables (low-click version)",
+    if st.button("🧹  Tesla Tools (operator version)\nHeatmaps and defect maps for any number of Tesla cables (low-click version)",
                  use_container_width=True, key="tesla_ops"):
         st.switch_page("pages/tesla_tools_few_clicks.py")
 
 # --- PARADISE ---
 with paradise_col:
-    st.markdown('#### 🧰 Paradise')
+    st.markdown('#### 🏝️ Paradise')
 
-    if st.button("📊  Paradise Summary\nSummary statistics and overview histograms for DCR and continuity.",
+    if st.button("📈  Paradise Summary\nSummary statistics and overview histograms for DCR and continuity.",
                  use_container_width=True, key="paradise_summary"):
         st.switch_page("pages/paradise_summary.py")
 
-    if st.button("🧰  Paradise Tools\nHeatmaps and defect maps for any number of paradise cables (high-click version)",
+    if st.button("🛠️  Paradise Tools\nHeatmaps and defect maps for any number of paradise cables (high-click version)",
                  use_container_width=True, key="paradise_tools"):
         st.switch_page("pages/paradise_tools.py")
 
-    if st.button("⚙️  Paradise Tools (operator version)\nHeatmaps and defect maps for any number of paradise cables (low-click version)",
+    if st.button("🧹  Paradise Tools (operator version)\nHeatmaps and defect maps for any number of paradise cables (low-click version)",
                  use_container_width=True, key="paradise_ops"):
         st.switch_page("pages/paradise_tools_few_clicks.py")
 
+    # --- NEW: SI Tools button ---
+    if st.button("🐍  SI Tools\nSignal Integrity analysis and utilities for Paradise cables.",
+                 use_container_width=True, key="paradise_si_tools"):
+        # Adjust the path below if your SI tools page has a different filename or location
+        st.switch_page("pages/paradise_SI.py")

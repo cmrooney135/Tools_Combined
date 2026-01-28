@@ -311,9 +311,9 @@ def build_master_dataframe(cables: dict, attr_name: str, *, pair_delim: str = "|
 
 
 
-st.set_page_config(page_title="Paradise Tools", page_icon="🧰", layout="wide")
+st.set_page_config(page_title="Paradise Tools", page_icon="🛠️", layout="wide")
 
-st.title("Paradise Tools")
+st.title("🏝️🛠️Paradise Tools")
 uploaded_files = st.file_uploader("Upload your CSV files", type="csv", accept_multiple_files=True)
 
 pattern = re.compile(r"(?<![A-Za-z0-9])0[0-4][A-Za-z0-9]{8}(?![A-Za-z0-9])", re.IGNORECASE)

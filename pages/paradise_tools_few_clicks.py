@@ -454,8 +454,8 @@ def _run_id(test):
 # =============================================================================
 # Streamlit UI
 # =============================================================================
-st.set_page_config(page_title="Paradise Tools", page_icon = "⚙️", layout="wide")
-st.title("Paradise Tools")
+st.set_page_config(page_title="Paradise Tools", page_icon = "🧹", layout="wide")
+st.title("🧹🏝️Paradise Tools")
 
 uploaded_files = st.file_uploader("Upload your CSV files", type="csv", accept_multiple_files=True)
 

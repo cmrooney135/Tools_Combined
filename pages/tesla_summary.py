@@ -42,7 +42,7 @@ CABLE_FAMILY = "tesla"  # <---- Set to "tesla" in this version
 
 # --- Session state init (call this FIRST) ---
 def init_state():
-    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon= "📊", layout="wide")
+    st.set_page_config(page_title=f"Summary · {CABLE_FAMILY.capitalize()}", page_icon= "📈", layout="wide")
 
     # Core containers
     st.session_state.setdefault("cables", [])
@@ -60,7 +60,7 @@ def init_state():
 
 init_state()
 
-st.title(f"Summary — {CABLE_FAMILY.capitalize()}")
+st.title(f"📈⚡Summary — {CABLE_FAMILY.capitalize()}")
 
 # ---------- ALWAYS RENDER THE UPLOADER ----------
 uploaded_files = st.file_uploader(
