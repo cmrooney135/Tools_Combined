@@ -617,6 +617,52 @@ def render_single_family():
                         x_label="Measured",
                     )
                     st.plotly_chart(figB, width="stretch")  # <-- was use_container_width=True
+                    # --- Summary statistics for all measurements (combined) ---
+                    # Safely compute stats with NaN handling
+                    vals = pd.to_numeric(pd.Series(all_vals), errors="coerce").to_numpy()
+
+                    count = int(np.sum(~np.isnan(vals)))
+                    mean = float(np.nanmean(vals)) if count > 0 else np.nan
+                    std = float(np.nanstd(vals, ddof=1)) if count > 1 else np.nan  # sample std dev
+                    vmin = float(np.nanmin(vals)) if count > 0 else np.nan
+                    vmax = float(np.nanmax(vals)) if count > 0 else np.nan
+
+                    stats_df_all = pd.DataFrame(
+                        {
+                            "Metric": ["Count", "Average", "Standard deviation", "Min", "Max"],
+                            "Value": [count, mean, std, vmin, vmax],
+                        }
+                    )
+
+                    # Optional: nice rounding for display (leave Count as int)
+                    def _fmt_val(x):
+                        if isinstance(x, (int, np.integer)):
+                            return x
+                        try:
+                            if np.isnan(x):
+                                return ""
+                            return round(float(x), 6)  # adjust precision to your needs
+                        except Exception:
+                            return x
+
+                    stats_df_all["Value"] = stats_df_all["Value"].apply(_fmt_val)
+
+                    st.caption("Summary statistics — all measurements combined")
+                    st.dataframe(
+                        stats_df_all,
+                        width="stretch",
+                        hide_index=True,
+                    )
+
+                    # Download button for the stats
+                    csv_stats_all = stats_df_all.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="Download combined stats (CSV)",
+                        data=csv_stats_all,
+                        file_name=f"{CABLE_FAMILY}_{ttype}_combined_stats.csv",
+                        mime="text/csv",
+                        key=f"download_{CABLE_FAMILY}_{ttype}_all_stats",
+                    )
                 else:
                     st.info("No raw measurements available to build the combined histogram.")
                 # --- Failures ---
