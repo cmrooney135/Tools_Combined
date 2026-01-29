@@ -491,7 +491,6 @@ def process_SI_file(uploaded_file, cables):
 
     # 2) Parse header
     header, data_start = read_header(uploaded_file)
-    print(header)
     serial_norm = header["cable_sn"].strip().upper()
     end = (header.get("position_tag") or "").strip().upper()  # "P1"/"P2"
     # 3) Find/create cable

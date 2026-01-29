@@ -167,7 +167,6 @@ def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd
     df.columns = [str(c).strip() for c in df.columns]
 
     ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
-    print(ttype)
 
     if "Channel" not in df.columns:
         st.error(
@@ -215,7 +214,6 @@ def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = Non
     if "Detail" not in df.columns:
         return pd.DataFrame()
     ttype = (getattr(test_obj, "test_type", None) or getattr(test_obj, "name", None) or "").strip().lower() or "unknown"
-    print(ttype)
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
     cable_type = getattr(cable_obj, "type", None)
     out = pd.DataFrame()
@@ -240,14 +238,12 @@ def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = Non
 
 def add_failures_minimal(cable_obj, test_obj, run_header: str | None = None, source_name: str | None = None):
     norm = normalize_failures_minimal(cable_obj, test_obj, run_header=run_header, source_name=source_name)
-    print("----------------failure data-------------------")
-    print(norm)
+
     if norm.empty:
         return
     ttype = norm["TestType"].iloc[0] if "TestType" in norm.columns else (
         (getattr(test_obj, "type", None) or getattr(test_obj, "name", None) or "unknown").strip().lower()
     )
-    print(ttype)
     failures = st.session_state.setdefault("failures_by_type", {})
 
     failures.setdefault(ttype, pd.DataFrame())
@@ -668,8 +664,7 @@ def render_single_family():
                 # --- Failures ---
                 st.markdown("**Failure breakdown**")
                 failures_all = st.session_state.get("failures_by_type", {}).get(ttype, pd.DataFrame())
-                print("----------------failure data-------------------")
-                print(failures_all)
+
                 if failures_all.empty or "Category" not in failures_all.columns:
                     st.info("No failure records available yet.")
                 else:

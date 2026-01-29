@@ -739,7 +739,6 @@ if uploaded_trace_csvs:
                 si_test.traces = {}
 
             si_test.traces[trace_key] = df
-            print(si_test)
             processed_trace.append(tf.name)
 
 

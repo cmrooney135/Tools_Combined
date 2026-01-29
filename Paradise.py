@@ -116,7 +116,6 @@ class Paradise(Cable):
     def bucket_reason(self, text: str) -> str:
         t = text.lower()
         if "short" in t:
-            print("returning short")
             return "short"
         if "miswire" in t:
             return "Miswire"
