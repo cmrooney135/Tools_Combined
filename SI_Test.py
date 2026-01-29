@@ -1,4 +1,3 @@
-
 # SI_Test.py
 from dataclasses import dataclass, field
 from typing import Optional, Dict
@@ -21,9 +20,16 @@ class SI_Test(Test):
     # SI specific
     test_end: str = ""                # "P1" or "P2"
     SI_type: str = ""                 # last seen ("zo"/"skew")
-    zo_data: Optional[pd.DataFrame] = None
+
+    # NOTE: elsewhere you treat zo_data as a dict of DataFrames; reflect that here.
+    zo_data: Optional[Dict[str, pd.DataFrame]] = None
+
     skew_data: Optional[pd.DataFrame] = None
+
+    # IMPORTANT: define the dataclass field *here* with default_factory,
+    # and put repr=False here (not in __init__ params).
     traces: Dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
+
     def __init__(
         self,
         *,
@@ -38,13 +44,11 @@ class SI_Test(Test):
         # SI-specific
         test_end: str = "",
         SI_type: str = "",
-        zo_data: Optional[pd.DataFrame] = None,
+        zo_data: Optional[Dict[str, pd.DataFrame]] = None,
         skew_data: Optional[pd.DataFrame] = None,
-        traces: Dict[str, pd.DataFrame] = field(default_factory=dict, repr=False),
-
-        
+        traces: Optional[Dict[str, pd.DataFrame]] = None,
     ):
-        # Call base initializer
+        # Initialize base
         super().__init__(
             test_type=test_type,
             result=result,
@@ -55,14 +59,23 @@ class SI_Test(Test):
             data=data,
             failure_data=failure_data,
         )
-        # Assign SI-specific declared fields (so repr will show them)
+
+        # Assign SI-specific fields
         self.test_end = test_end
         self.SI_type = SI_type
         self.zo_data = zo_data
         self.skew_data = skew_data
-        self.traces = traces
 
+        # Ensure we never end up with a Field/None here
+        self.traces = {} if traces is None else dict(traces)
+
+        # If you want to keep some normalization step, do it here (since __post_init__ won't be auto-called)
+        # Example: coerce wrong zo_data shapes to None instead of blowing up later.
+        if self.zo_data is not None and not isinstance(self.zo_data, dict):
+            self.zo_data = None
+
+    # With init=False and a custom __init__, __post_init__ is not auto-invoked.
+    # You can delete this method, or call it manually from __init__ if you still want it.
     def __post_init__(self):
-        # Backfill for old instances or deserialized objects
-        if not hasattr(self, "traces") or self.traces is None:
+        if not isinstance(getattr(self, "traces", None), dict):
             self.traces = {}
