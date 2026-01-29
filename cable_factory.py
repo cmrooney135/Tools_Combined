@@ -10,8 +10,19 @@ CABLE_MAP = {
 }
 
 def create_cable(serial_number: str):
-    key = serial_number.strip().upper()[1]
-    cls, length = CABLE_MAP[key]
+    if not isinstance(serial_number, str):
+        return None
+
+    serial = serial_number.strip().upper()
+    if len(serial) < 2:
+        return None
+
+    key = serial[1]
+    mapping = CABLE_MAP.get(key)
+    if mapping is None:
+        return None
+
+    cls, length = mapping
     return cls(serial_number, length)
 
 GOLDEN_MAP = {

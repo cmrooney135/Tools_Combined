@@ -6,7 +6,6 @@ from Test import Test
 
 @dataclass(init=False, repr=True)
 class SI_Test(Test):
-    # ----- Declare ALL fields here so dataclass repr shows them -----
     # Base/metadata
     test_type: str = "si"
     result: str = "NA"

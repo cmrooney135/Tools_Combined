@@ -497,6 +497,8 @@ def process_SI_file(uploaded_file, cables):
     cable = next((c for c in cables if c.serial_number.strip().upper() == serial_norm), None)
     if cable is None:
         cable = create_cable(serial_norm)
+        if cable == None:
+            return None, None
         cables.append(cable)
 
     # 4) Parse data with the correct reader
