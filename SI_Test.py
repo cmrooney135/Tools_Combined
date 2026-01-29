@@ -1,7 +1,7 @@
 
 # SI_Test.py
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Dict
 import pandas as pd
 from Test import Test
 
@@ -23,7 +23,7 @@ class SI_Test(Test):
     SI_type: str = ""                 # last seen ("zo"/"skew")
     zo_data: Optional[pd.DataFrame] = None
     skew_data: Optional[pd.DataFrame] = None
-
+    traces: Dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
     def __init__(
         self,
         *,
@@ -40,6 +40,9 @@ class SI_Test(Test):
         SI_type: str = "",
         zo_data: Optional[pd.DataFrame] = None,
         skew_data: Optional[pd.DataFrame] = None,
+        traces: Dict[str, pd.DataFrame] = field(default_factory=dict, repr=False),
+
+        
     ):
         # Call base initializer
         super().__init__(
@@ -57,3 +60,9 @@ class SI_Test(Test):
         self.SI_type = SI_type
         self.zo_data = zo_data
         self.skew_data = skew_data
+        self.traces = traces
+
+    def __post_init__(self):
+        # Backfill for old instances or deserialized objects
+        if not hasattr(self, "traces") or self.traces is None:
+            self.traces = {}

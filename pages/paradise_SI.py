@@ -1,8 +1,14 @@
 import streamlit as st 
 
 import plotly.express as px
+from cable_factory import create_cable
+from SI_Test import SI_Test
+from dataclasses import dataclass, field
+
 import pandas as pd
 import numpy as np
+from Test import Test
+from Cable import Cable
 import streamlit as st
 from _shared_ui import top_bar
 from UploadSIData import process_SI_file
@@ -25,7 +31,23 @@ def ensure_state():
     st.session_state.setdefault("leakage_defects", {})
     st.session_state.setdefault("leakage_1s_figs", {})
     st.session_state.setdefault("leakage_1s_defects", {})
+    
+    st.session_state.setdefault("traces", [])              
+    st.session_state.setdefault("processed_trace_files", []) 
 
+def migrate_si_tests_traces():
+    """
+    Normalize all SI_Test.traces to a dict for existing objects in session_state.
+    """
+    cables = st.session_state.get("cables", [])
+    for c in cables:
+        si_list = getattr(c, "TESTS", {}).get("si", []) or []
+        for t in si_list:
+            val = getattr(t, "traces", None)
+            if val is None or isinstance(val, dataclasses.Field) or not isinstance(val, dict):
+                setattr(t, "traces", {})
+
+migrate_si_tests_traces()
 ensure_state()
 top_bar(page_icon="🐍", title="🏝️SI Tools", home_page_path="Home.py")
 
@@ -33,8 +55,248 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 import streamlit as st
+import re
+from typing import Optional, Dict
 
-# ---- existing helper from earlier ----
+
+import re
+from typing import Optional, Dict
+import re
+from typing import Optional, Dict
+
+def parse_trace_filename(name: str) -> Optional[Dict[str, str]]:
+    """
+    Parse 'SN-01ACA3A061_J2.A01_P1_M1(.csv)' → {'serial': '01ACA3A061', 'end': 'P1', 'channel': 'A01'}
+    Channel is optional to use; serial and end are required for auto-attach.
+    """
+    base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    base_no_ext = re.sub(r"\.[A-Za-z0-9]+$", "", base)
+
+    pat = re.compile(
+        r"""(?ix)
+        ^SN-? (?P<serial>[A-Z0-9]+)
+        _
+        [A-Z0-9]+ \. (?P<channel>[A-Z]\d{2})
+        _
+        (?P<end>P[12])
+        (?:_.*)?$
+        """
+    )
+    m = pat.match(base_no_ext)
+    if not m:
+        # Fallback: at least get serial + end
+        pat2 = re.compile(r"""(?ix)^SN-?(?P<serial>[A-Z0-9]+).*?(?P<end>P[12]).*$""")
+        m = pat2.match(base_no_ext)
+        if not m:
+            return None
+
+    info = {k: v for k, v in m.groupdict().items() if v}
+    info["serial"] = info["serial"].upper()
+    info["end"] = info["end"].upper()
+    if "channel" in info and info["channel"]:
+        info["channel"] = info["channel"].upper()
+    return info
+def get_or_create_cable(cables: list, serial: str) -> Cable:
+    """Find a cable by serial_number or create and append one."""
+    found = next((c for c in cables if getattr(c, "serial_number", None) == serial), None)
+    if found is not None:
+        return found
+    # Create a new cable shell
+    cable = create_cable(serial)
+    cables.append(cable)
+    return cable
+
+def get_or_create_si_test_for_end(cable: Cable, end: str) -> Test:
+    """Find the latest SI test for end (P1/P2) or create one and append."""
+    si_list = getattr(cable, "TESTS", {}).get("si", []) or []
+    matches = [t for t in si_list if (getattr(t, "test_end", "") or "").upper() == end.upper()]
+    if matches:
+        return matches[-1]
+    # Create a new SI test shell
+    test = SI_Test(
+                test_type="si",
+                test_end=end,
+            )
+    # Ensure list exists in TESTS dict
+    if "si" not in cable.TESTS or cable.TESTS["si"] is None:
+        cable.TESTS["si"] = []
+    cable.TESTS["si"].append(test)
+    return test
+def validate_parsed(info: Dict[str, str]) -> None:
+    """
+    Raise ValueError if any piece is malformed.
+    - serial: alphanumeric (10–12 typical; we won't hard fail on length)
+    - channel: Letter + 2 digits (e.g., A01, B12)
+    - end: P1 or P2
+    """
+    if not info:
+        raise ValueError("Could not parse filename.")
+    if not re.fullmatch(r"[A-Z0-9]+", info["serial"]):
+        raise ValueError(f"Invalid serial: {info['serial']}")
+    if not re.fullmatch(r"[A-Z]\d{2}", info["channel"]):
+        raise ValueError(f"Invalid channel: {info['channel']}")
+    if info["end"] not in ("P1", "P2"):
+        raise ValueError(f"Invalid end: {info['end']}")
+    
+# ---- Skew Overall (from two numeric columns before 'skew [nS]') ----
+import re
+import numpy as np
+import pandas as pd
+
+def _find_two_numeric_pre_skew_cols(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    """
+    Try to find the two numeric columns that precede the 'skew' marker column.
+    Expected layout (example):
+      [pair_label, v1, v2, 'skew [nS]', delta, result]
+    Strategy:
+      1) Find column whose name contains 'skew' (case-insensitive).
+      2) Take the two columns immediately to its left (if present).
+      3) Validate they are numeric (or coercible).
+      4) Fallback: choose the first two numeric-looking columns after the first column.
+    Returns (col_v1, col_v2) or (None, None) if not found.
+    """
+    cols = list(df.columns)
+
+    # Heuristic 1: locate the 'skew' column by name
+    skew_idx = None
+    for i, c in enumerate(cols):
+        cname = str(c).strip().lower()
+        if "skew" in cname:
+            skew_idx = i
+            break
+
+    # If found, pick two columns to the left of skew column
+    if skew_idx is not None and skew_idx >= 2:
+        c1 = cols[skew_idx - 2]
+        c2 = cols[skew_idx - 1]
+
+        # Check numeric-ness (allow coercion)
+        s1 = pd.to_numeric(df[c1], errors="coerce")
+        s2 = pd.to_numeric(df[c2], errors="coerce")
+        if s1.notna().sum() > 0 and s2.notna().sum() > 0:
+            return c1, c2
+
+    # Heuristic 2: fallback—pick the first two numeric columns ignoring the leftmost label-like column
+    # Often col0 is the "J2.A01 / J2.A02" label—so start from col1
+    numeric_cols = []
+    for c in cols[1:] if len(cols) > 1 else cols:
+        ser = pd.to_numeric(df[c], errors="coerce")
+        if ser.notna().sum() > 0:
+            numeric_cols.append(c)
+        if len(numeric_cols) >= 2:
+            break
+
+    if len(numeric_cols) >= 2:
+        return numeric_cols[0], numeric_cols[1]
+
+    return None, None
+
+
+def _collect_skew_overall_from_paircols_per_test(cables, end: str) -> pd.DataFrame:
+    """
+    For each SI_Test.skew_data on the given end, compute:
+      Overall Max (nS) = max of the first numeric column (v1)
+      Overall Min (nS) = min of the second numeric column (v2)
+      Span (nS)        = Overall Max - Overall Min
+    Returns a long DataFrame:
+      ['Serial','End','Label','Overall Max (nS)','Overall Min (nS)','Span (nS)']
+    """
+    rows = []
+    for cable, test in _iter_si_tests(cables):
+        if (getattr(test, "test_end", "") or "").upper() != end.upper():
+            continue
+        df = getattr(test, "skew_data", None)
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        v1_col, v2_col = _find_two_numeric_pre_skew_cols(df)
+        if not v1_col or not v2_col:
+            # Nothing usable in this test
+            continue
+
+        v1 = pd.to_numeric(df[v1_col], errors="coerce")
+        v2 = pd.to_numeric(df[v2_col], errors="coerce")
+
+        v1 = v1[np.isfinite(v1)]
+        v2 = v2[np.isfinite(v2)]
+        if v1.empty or v2.empty:
+            continue
+
+        overall_max = float(np.nanmax(v1))
+        overall_min = float(np.nanmin(v2))
+        span = overall_max - overall_min
+
+        label = _format_col_label(
+            getattr(cable, "serial_number", "?"),
+            getattr(test, "test_date", None),
+            getattr(test, "test_time", None),
+        )
+
+        rows.append({
+            "Serial": getattr(cable, "serial_number", "?"),
+            "End": end.upper(),
+            "Label": label,
+            "Overall Max (nS)": overall_max,
+            "Overall Min (nS)": overall_min,
+            "Span (nS)": span,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_skew_overall_from_paircols_wide(cables, end: str) -> pd.DataFrame:
+    """
+    Wide matrix with rows = ['Overall Max','Overall Min','Span']
+    and columns = '<Serial> <M/D/YYYY H:MM>' per test.
+    """
+    df = _collect_skew_overall_from_paircols_per_test(cables, end=end)
+    if df.empty:
+        return pd.DataFrame(columns=["Metric"])
+
+    cols = {}
+    existing = set()
+    for _, r in df.iterrows():
+        label = _dedup_label(r["Label"], existing)
+        existing.add(label)
+        cols[label] = pd.Series({
+            "Overall Max": r["Overall Max (nS)"],
+            "Overall Min": r["Overall Min (nS)"],
+            "Span":        r["Span (nS)"],
+        })
+
+    wide = pd.DataFrame(cols)
+    wide.insert(0, "Metric", wide.index)
+    wide.reset_index(drop=True, inplace=True)
+    return wide
+def attach_trace_by_serial_end(cables, df: pd.DataFrame, serial: str, end: str, trace_name: str) -> bool:
+    """
+    Find cable by serial_number, then attach the trace to the latest SI test for the given end (P1/P2).
+    Returns True if successful, False otherwise.
+    """
+    # 1) Find cable
+    cable = next((c for c in cables if getattr(c, "serial_number", None) == serial), None)
+    if cable is None:
+        return False
+
+    # 2) Find latest SI test with matching end
+    si_tests = getattr(cable, "TESTS", {}).get("si", []) or []
+    candidates = [t for t in si_tests if (getattr(t, "test_end", "") or "").upper() == end.upper()]
+    if not candidates:
+        return False
+
+    latest = candidates[-1]
+    latest.traces[trace_name] = df
+    return True
+def attach_trace_to_latest_test(cable, df: pd.DataFrame, trace_name: str, end: str):
+    # find last SI test for this end (P1/P2)
+    si_tests = getattr(cable, "TESTS", {}).get("si", []) or []
+    candidates = [t for t in si_tests if (getattr(t, "test_end", "") or "").upper() == end.upper()]
+    if not candidates:
+        return False
+    latest = candidates[-1]
+    latest.traces[trace_name] = df
+    return True
+
 def _iter_si_tests(cables):
     """Yield (cable, test) for each SI test."""
     for c in cables:
@@ -211,6 +473,13 @@ uploaded_files = st.file_uploader("Upload your SI files", type="DAT", accept_mul
 cables = st.session_state["cables"]
 processed = st.session_state["processed_files"]
 
+uploaded_trace_csvs = st.file_uploader(
+    "Upload your Trace CSV files",
+    type=["csv"],
+    accept_multiple_files=True,
+    key="trace_uploader"
+)
+
 if uploaded_files:
     for uf in uploaded_files:
         if uf.name in processed:
@@ -331,4 +600,286 @@ with st.expander("Skew — Δ (nS)", expanded=False):
                     mime="text/csv",
                     use_container_width=True
                 )
+import plotly.express as px
 
+st.divider()
+st.subheader("Skew Overall from Pair Columns (Max of Col2, Min of Col3)")
+
+ends = ["P1", "P2"]
+cols = st.columns(2)
+
+for i, end in enumerate(ends):
+    with cols[i]:
+        df_overall = _collect_skew_overall_from_paircols_per_test(st.session_state["cables"], end=end)
+
+        if df_overall.empty:
+            st.info(f"No overall skew data (pair columns) for {end}")
+            continue
+
+        # ---- Global summary per end ----
+        global_max = float(df_overall["Overall Max (nS)"].max())
+        global_min = float(df_overall["Overall Min (nS)"].min())
+        global_span = global_max - global_min
+
+        st.markdown(f"**End: {end}**")
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(label="Global Overall Max (nS)", value=f"{global_max:.4f}")
+        with m2:
+            st.metric(label="Global Overall Min (nS)", value=f"{global_min:.4f}")
+        with m3:
+            st.metric(label="Global Span (nS)", value=f"{global_span:.4f}")
+
+        # ---- Per-test table ----
+        st.dataframe(
+            df_overall.sort_values("Label"),
+            use_container_width=True,
+            height=260
+        )
+
+        # ---- Span bar chart ----
+        fig = px.bar(
+            df_overall.sort_values("Span (nS)", ascending=False),
+            x="Label", y="Span (nS)",
+            title=f"Skew Span from Pair Columns — {end}",
+        )
+        fig.update_layout(
+            xaxis_title="Test",
+            yaxis_title="Span (nS)",
+            template="plotly_white",
+            margin=dict(l=10, r=10, t=40, b=10),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ---- Downloads ----
+        wide = build_skew_overall_from_paircols_wide(st.session_state["cables"], end=end)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button(
+                label=f"Download Skew Overall (Pair Cols) — {end} — WIDE CSV",
+                data=wide.to_csv(index=False),
+                file_name=f"Skew_{end}_Overall_from_paircols_wide.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with c2:
+            st.download_button(
+                label=f"Download Skew Overall (Pair Cols) — {end} — LONG CSV",
+                data=df_overall.to_csv(index=False),
+                file_name=f"Skew_{end}_Overall_from_paircols_long.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+processed_trace = st.session_state["processed_trace_files"]
+
+st.session_state.setdefault("traces", [])  
+
+
+default_x_name = st.selectbox(
+    "X-axis meaning", ["time_s", "freq_hz", "sample_idx", "x"], index=0, key="trace_x_name"
+)
+default_y_name = st.selectbox(
+    "Y-axis meaning", ["value", "magnitude_db", "voltage_v", "current_a", "y"], index=0, key="trace_y_name"
+)
+
+processed_trace = st.session_state.setdefault("processed_trace_files", [])
+st.session_state.setdefault("traces", [])  
+
+if uploaded_trace_csvs:
+    for tf in uploaded_trace_csvs:
+        if tf.name in processed_trace:
+            continue
+
+        try:
+            # Read headerless x,y CSV
+            df = pd.read_csv(tf, header=None, names=[default_x_name, default_y_name])
+            # Clean numeric
+            for col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df.dropna(inplace=True)
+
+            meta = parse_trace_filename(tf.name)
+            if not meta:
+                # Could not parse filename → keep unattached for manual handling
+                st.session_state["traces"].append({"name": tf.name, "df": df})
+                processed_trace.append(tf.name)
+                st.warning(f"Could not parse '{tf.name}' for serial/end; kept in unattached pool.")
+                continue
+
+            serial = meta["serial"]
+            end = meta["end"]
+            # optional: make trace key by channel if available
+            trace_key = meta.get("channel", tf.name)
+
+            # --- Get-or-create Cable and SI Test ---
+            cable = get_or_create_cable(st.session_state["cables"], serial=serial)
+            si_test = get_or_create_si_test_for_end(cable, end=end)
+            # Attach trace
+            si_test.traces[trace_key] = df
+            processed_trace.append(tf.name)
+
+            st.success(f"Attached '{tf.name}' to Cable {serial} — End {end}" + (f" — Channel {meta.get('channel')}" if meta.get('channel') else ""))
+
+        except Exception as e:
+            st.warning(f"Failed to read/attach '{tf.name}': {e}")
+
+    st.session_state["processed_trace_files"] = list(processed_trace)
+  
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+
+st.divider()
+st.subheader("Trace Overlays (per Cable, grouped by End)")
+
+# ----- Controls -----
+col_opts = st.columns(4)
+with col_opts[0]:
+    x_pref = st.selectbox("X-axis preference", ["Auto", "time_s", "freq_hz", "x", "sample_idx"], index=0)
+with col_opts[1]:
+    do_downsample = st.checkbox("Downsample traces (for speed)", value=True)
+with col_opts[2]:
+    normalize_y = st.checkbox("Normalize Y to [0,1]", value=False)
+with col_opts[3]:
+    offset_y = st.checkbox("Apply vertical offsets", value=False)
+
+offset_step = 0.0
+if offset_y:
+    offset_step = st.number_input("Offset step (adds per-trace vertical offset)", value=0.5, step=0.1)
+
+max_points = 2000 if do_downsample else None
+
+# ----- Helper: choose x/y columns from a trace df -----
+def pick_xy_columns(df: pd.DataFrame, x_pref: str = "Auto"):
+    cols = list(df.columns)
+    # First try explicit preference
+    if x_pref != "Auto" and x_pref in df.columns:
+        x_col = x_pref
+        # pick the "other" numeric column as Y
+        numeric_others = [c for c in cols if c != x_col and pd.api.types.is_numeric_dtype(df[c])]
+        y_col = numeric_others[0] if numeric_others else None
+        if y_col:
+            return x_col, y_col
+
+    # Heuristics
+    candidates_x = ["time_s", "freq_hz", "x", "sample_idx"]
+    x_col = next((c for c in candidates_x if c in cols), None)
+    if x_col is None:
+        # fallback: first numeric column
+        numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+        x_col = numeric_cols[0] if numeric_cols else None
+
+    # Y is any other numeric column that is not the x
+    y_col = None
+    if x_col is not None:
+        numeric_others = [c for c in cols if c != x_col and pd.api.types.is_numeric_dtype(df[c])]
+        y_col = numeric_others[0] if numeric_others else None
+
+    # Final fallback: if only two columns, take them in order
+    if x_col is None or y_col is None:
+        if len(cols) >= 2:
+            x_col, y_col = cols[0], cols[1]
+
+    return x_col, y_col
+
+# ----- Helper: downsample (uniform pick) -----
+def simple_downsample(x: np.ndarray, y: np.ndarray, max_points: int | None):
+    if max_points is None or len(x) <= max_points:
+        return x, y
+    idx = np.linspace(0, len(x) - 1, num=max_points).astype(int)
+    return x[idx], y[idx]
+
+# ----- Build overlay plots -----
+# We’ll loop cables, then per end (P1/P2), gather traces from each SI_Test
+ends = ["P1", "P2"]
+
+for cable in st.session_state.get("cables", []):
+    sn = getattr(cable, "serial_number", "?")
+    si_list = getattr(cable, "TESTS", {}).get("si", []) or []
+
+    # Map end -> list of (trace_name, df)
+    end_to_traces = {e: [] for e in ends}
+    for t in si_list:
+        traces_obj = getattr(t, "traces", None)
+
+        # Strict guard: skip if not a dict (covers Field/None/anything else)
+        if not isinstance(traces_obj, dict) or not traces_obj:
+            continue
+
+        end = (getattr(t, "test_end", "") or "").upper()
+        if end in end_to_traces:
+            for name, df in traces_obj.items():
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    end_to_traces[end].append((name, df))
+
+    # Only render section for cable if there is at least one trace
+    if not any(end_to_traces[e] for e in ends):
+        continue
+
+    st.markdown(f"### Cable **{sn}**")
+
+    tab_p1, tab_p2 = st.tabs(["End P1", "End P2"])
+    for e, tab in zip(ends, [tab_p1, tab_p2]):
+        with tab:
+            traces = end_to_traces[e]
+            if not traces:
+                st.caption(f"No traces for **{sn}** — **{e}**")
+                continue
+
+            fig = go.Figure()
+            y_offset = 0.0
+
+            for name, df in traces:
+                # Pick columns
+                x_col, y_col = pick_xy_columns(df, x_pref=x_pref)
+                if x_col is None or y_col is None:
+                    st.warning(f"Skipping trace '{name}' (could not infer x/y columns).")
+                    continue
+
+                # Extract numeric arrays
+                x_vals = pd.to_numeric(df[x_col], errors="coerce").to_numpy(dtype=float)
+                y_vals = pd.to_numeric(df[y_col], errors="coerce").to_numpy(dtype=float)
+                mask = np.isfinite(x_vals) & np.isfinite(y_vals)
+                x_vals, y_vals = x_vals[mask], y_vals[mask]
+
+                if len(x_vals) < 2:
+                    st.warning(f"Skipping trace '{name}' (too few points after cleaning).")
+                    continue
+
+                # Optional normalization
+                if normalize_y:
+                    ymin, ymax = np.nanmin(y_vals), np.nanmax(y_vals)
+                    span = (ymax - ymin) if np.isfinite(ymax - ymin) and (ymax - ymin) != 0 else 1.0
+                    y_vals = (y_vals - ymin) / span
+
+                # Optional offset
+                if offset_y and offset_step != 0:
+                    y_vals = y_vals + y_offset
+                    y_offset += offset_step
+
+                # Optional downsample
+                x_plot, y_plot = simple_downsample(x_vals, y_vals, max_points=max_points)
+
+                # Use Scattergl if many points
+                use_gl = len(x_plot) > 5000
+                trace_obj = go.Scattergl if use_gl else go.Scatter
+                fig.add_trace(
+                    trace_obj(
+                        x=x_plot, y=y_plot, mode="lines", name=name,
+                        line=dict(width=1.5),
+                        hovertemplate=f"<b>{name}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>",
+                    )
+                )
+
+            # Titles & axes
+            fig.update_layout(
+                title=f"Overlay — Cable {sn} — {e}",
+                template="plotly_white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                margin=dict(l=10, r=10, t=48, b=10),
+                hovermode="x unified",
+            )
+            fig.update_xaxes(title_text=x_pref if x_pref != "Auto" else "X")
+            fig.update_yaxes(title_text="Y (normalized)" if normalize_y else "Y")
+
+            st.plotly_chart(fig, use_container_width=True)

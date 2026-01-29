@@ -164,7 +164,6 @@ def read_skew_dataframe(src, data_start: int) -> pd.DataFrame:
     """
     lines = _read_all_lines(src)
     data_lines = [ln for ln in lines[data_start:] if ln.strip() and "," in ln]
-
     out_rows = []
     for ln in data_lines:
         parts = [p.strip() for p in ln.split(",")]
@@ -224,23 +223,127 @@ def _read_all_lines(obj) -> List[str]:
         return text.splitlines(True)
 
     raise TypeError(f"Unsupported input type: {type(obj).__name__}")
+from typing import Tuple
+import re
 
-def parse_sample_id_value(sample_id: str) -> Tuple[str, str]:
+from typing import Tuple
+import re
+
+def _normalize_for_tokens(s: str) -> str:
     """
-    '005220a061-P1' or '005220a061_P1' -> ('005220A061', 'P1')
+    Uppercase and replace all non-alphanumeric with single spaces.
+    This collapses weird unicode dashes/underscores, NBSP, etc.
     """
-    s = (sample_id or "").strip()
-    if not s:
-        return "", ""
-    s_norm = s.replace("_", "-")
-    parts = s_norm.split("-", 1)
-    sn = (parts[0].strip() if parts else "").upper()
-    end = ""
-    if len(parts) == 2:
-        tail = parts[1].strip()
-        if tail and tail[0].upper() == "P" and tail[1:].isdigit():
-            end = "P" + str(int(tail[1:]))  # normalize P01 -> P1
-    return sn, end
+    if s is None:
+        return ""
+    s = s.upper()
+    # Replace any char that's NOT A-Z or 0-9 with a space
+    s = re.sub(r"[^A-Z0-9]+", " ", s)
+    # Collapse multiple spaces
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+from typing import Tuple
+import re
+
+def _normalize_for_tokens(s: str) -> str:
+    """
+    Uppercase and replace all non-alphanumeric with single spaces.
+    This collapses underscores, dashes, unicode spaces, etc., into separators.
+    """
+    if s is None:
+        return ""
+    s = s.upper()
+    s = re.sub(r"[^A-Z0-9]+", " ", s)   # non-alnum -> space
+    s = re.sub(r"\s+", " ", s).strip()  # collapse spaces
+    return s
+
+def parse_sample_id_value(sample_id_raw: str) -> Tuple[str, str]:
+    """
+    Extract (serial, position_tag) from a 'Sample ID' value robustly.
+
+    Handles examples:
+      'Sample ID:  SN-01ACA3A061_P2'
+      'Sample ID: SN01ACA3A061-P1'
+      'Sample ID: 01ACA3A061 P2'
+      '::Sample ID:  sn–01aca3a061 p1'  # unicode dash and NBSP
+
+    Returns:
+      (serial_upper, position_tag_upper)
+      position_tag is 'P1'/'P2' or '' if not present.
+
+    Guarantees:
+      - Never returns 'SN' as the serial.
+    """
+    raw = sample_id_raw or ""
+    raw_upper = raw.upper()
+
+    # --- Detect glued SN first on the raw string (e.g., SN01ACA3A061) ---
+    m_glued = re.search(r"\bSN([A-Z0-9]{3,})\b", raw_upper)
+    serial_glued = m_glued.group(1) if m_glued else ""
+
+    # --- Normalize and tokenize for robust parsing ---
+    norm = _normalize_for_tokens(raw)
+    tokens = norm.split()  # e.g., ["SAMPLE", "ID", "SN", "01ACA3A061", "P2"]
+
+    # --- Position tag detection from normalized tokens ---
+    pos = ""
+    for t in tokens:
+        if t in ("P1", "P2"):
+            pos = t
+            break
+
+    # --- Serial detection ---
+    serial = ""
+
+    # 1) If we detected glued SN on raw: use it
+    if serial_glued:
+        serial = serial_glued
+    else:
+        # 2) Prefer the token immediately after 'SN'
+        try:
+            sn_idx = next(i for i, t in enumerate(tokens) if t == "SN")
+        except StopIteration:
+            sn_idx = -1
+
+        if sn_idx >= 0 and (sn_idx + 1) < len(tokens):
+            cand = tokens[sn_idx + 1]
+            if cand not in ("P1", "P2") and re.fullmatch(r"[A-Z0-9]{3,}", cand):
+                serial = cand
+
+        # 3) Fallback: first plausible alnum token (skip common words and P1/P2)
+        if not serial:
+            for t in tokens:
+                if t in ("SN", "SAMPLE", "ID", "P1", "P2"):
+                    continue
+                # If your serial is exactly 10 chars, you can tighten this:
+                # if re.fullmatch(r"[A-Z0-9]{10}", t):
+                if re.fullmatch(r"[A-Z0-9]{5,}", t):  # >=5 to avoid tiny junk tokens
+                    serial = t
+                    break
+
+    if not serial:
+        raise ValueError(f"Could not extract serial from Sample ID: '{sample_id_raw}'")
+
+    return serial.upper(), pos.upper()
+from typing import Tuple
+import re
+
+def _normalize_for_tokens(s: str) -> str:
+    """
+    Uppercase and replace all non-alphanumeric with single spaces.
+    This collapses weird unicode dashes/underscores, NBSP, etc.
+    """
+    if s is None:
+        return ""
+    s = s.upper()
+    s = re.sub(r"[^A-Z0-9]+", " ", s)   # non-alnum -> space
+    s = re.sub(r"\s+", " ", s).strip()  # collapse spaces
+    return s
+
+
+from typing import Dict, Optional, Tuple
+import datetime as dt
+import re
 
 def read_header(src) -> Tuple[Dict[str, Optional[str]], int]:
     """
@@ -260,24 +363,29 @@ def read_header(src) -> Tuple[Dict[str, Optional[str]], int]:
         raise ValueError("Empty file")
 
     first_idx, first_line = non_empty[0]
+    fl_norm = first_line.strip()
 
-    # Skew-only header (just "Sample ID: ...")
-    if first_line.lower().startswith("sample id"):
-        if ":" not in first_line:
-            raise ValueError(f"Expected 'Sample ID: <value>', got: {first_line}")
-        _, val = first_line.split(":", 1)
-        sample_id = val.strip()
-        sn, pos = parse_sample_id_value(sample_id)
+    # --- Skew-only or one-line variants: recognize 'Sample ID' anywhere in line (case-insensitive)
+    if re.search(r'(?i)\bsample\s*id\b', fl_norm):
+        # Split on first ':' if present
+        if ":" in fl_norm:
+            sample_id_val = fl_norm.split(":", 1)[1].strip()
+        else:
+            m_sid = re.search(r'(?i)\bsample\s*id\b\s*(.*)$', fl_norm)
+            sample_id_val = (m_sid.group(1).strip() if m_sid else "")
+
+        candidate = sample_id_val if sample_id_val else fl_norm
+        sn, pos = parse_sample_id_value(candidate)
         header = {
-            "test_date": None,                 # <-- no timestamp in Skew
-            "test_time": None,                 # <-- no timestamp in Skew
+            "test_date": None,
+            "test_time": None,
             "cable_sn": sn,
-            "sample_id": sample_id,
+            "sample_id": sample_id_val if sample_id_val else fl_norm,
             "position_tag": pos.upper(),
         }
         return header, first_idx + 1
 
-    # Zo-style: date, time, 'Sample ID'
+    # --- Zo-style header: date, time, 'Sample ID' triple ---
     if len(non_empty) < 3:
         raise ValueError("Expected either single 'Sample ID' or date/time/sample-id triple.")
 
@@ -303,17 +411,22 @@ def read_header(src) -> Tuple[Dict[str, Optional[str]], int]:
     if time_obj is None:
         raise ValueError(f"Unrecognized time: '{raw_time}'")
 
-    if ":" not in sample_line:
+    if ":" not in sample_line and not re.search(r'(?i)\bsample\s*id\b', sample_line):
         raise ValueError(f"Expected 'Sample ID: <value>', got: {sample_line}")
-    _, val = sample_line.split(":", 1)
-    sample_id = val.strip()
-    sn, pos = parse_sample_id_value(sample_id)
+
+    if ":" in sample_line:
+        sample_id_val = sample_line.split(":", 1)[1].strip()
+    else:
+        m_sid = re.search(r'(?i)\bsample\s*id\b\s*(.*)$', sample_line)
+        sample_id_val = (m_sid.group(1).strip() if m_sid else "")
+
+    sn, pos = parse_sample_id_value(sample_id_val)
 
     header = {
         "test_date": date_obj.isoformat(),
         "test_time": time_obj.strftime("%H:%M:%S"),
         "cable_sn": sn,
-        "sample_id": sample_id,
+        "sample_id": sample_id_val,
         "position_tag": pos.upper(),
     }
     return header, sid_idx + 1
@@ -378,9 +491,9 @@ def process_SI_file(uploaded_file, cables):
 
     # 2) Parse header
     header, data_start = read_header(uploaded_file)
+    print(header)
     serial_norm = header["cable_sn"].strip().upper()
     end = (header.get("position_tag") or "").strip().upper()  # "P1"/"P2"
-
     # 3) Find/create cable
     cable = next((c for c in cables if c.serial_number.strip().upper() == serial_norm), None)
     if cable is None:
