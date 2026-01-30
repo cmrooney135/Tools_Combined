@@ -427,31 +427,68 @@ def build_skew_wide_matrix(cables, *, end: str) -> pd.DataFrame:
     wide.insert(0, "Channels", wide.index)
     wide.reset_index(drop=True, inplace=True)
     return wide
+import numpy as np
+import pandas as pd
 
 def _collect_skew_delta(cables, end: str) -> pd.DataFrame:
     """
-    Gather all 'delta' values from SI_Test.skew_data for the given end ('P1' or 'P2')
-    across all cables, returning a DataFrame with a single column 'value_ps'.
-    Assumes the original 'delta' column was in nS; converts to pS.
+    For the given end ('P1' or 'P2'), compute the maximum skew 'delta' per cable
+    from SI_Test.skew_data, returning a one-column DataFrame 'value_ps'.
+
+    Behavior:
+      - One row per cable (in the first-seen order from _iter_si_tests).
+      - Combines multiple tests per cable via max.
+      - Interprets 'delta' in nS and converts to pS (via _ns_to_ps_series).
+      - If a cable has no valid 'delta' values, its entry is NaN.
     """
-    deltas_ps = []
+    def _key_for_cable(cable):
+        # Create a stable grouping key for potentially unhashable cable objects
+        for attr in ("serial", "name", "id"):
+            if hasattr(cable, attr):
+                val = getattr(cable, attr)
+                if val is not None:
+                    return val
+        return str(cable)  # last resort, should still be stable within a run
+
+    per_cable_max = {}  # key -> float (ps); initialize to NaN
+    order = []          # preserve first-seen order of distinct cables
+
     for cable, test in _iter_si_tests(cables):
+        key = _key_for_cable(cable)
+
+        # Ensure every cable appears even if current test doesn't match
+        if key not in per_cable_max:
+            per_cable_max[key] = np.nan
+            order.append(key)
+
+        # Only process the requested end
         if getattr(test, "test_end", "").upper() != end.upper():
             continue
-        df = getattr(test, "skew_data", None)
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            colname = next((c for c in df.columns if str(c).strip().lower() == "delta"), None)
-            if colname:
-                series_ps = _ns_to_ps_series(df[colname]).dropna()
-                if not series_ps.empty:
-                    deltas_ps.extend(series_ps.tolist())
-    return pd.DataFrame({"value_ps": deltas_ps})
 
-def _iter_si_tests(cables):
-    """Yield each SI_Test found on all cables."""
-    for c in cables:
-        for t in getattr(c, "TESTS", {}).get("si", []) or []:
-            yield c, t
+        # Pull skew_data DataFrame
+        df = getattr(test, "skew_data", None)
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        # Find a 'delta' column (case/space-insensitive)
+        colname = next((c for c in df.columns if str(c).strip().lower() == "delta"), None)
+        if not colname:
+            continue
+
+        # Convert nS -> pS and drop NaNs
+        series_ps = _ns_to_ps_series(df[colname]).dropna()
+        if series_ps.empty:
+            continue
+
+        # Max for this test, then aggregate with the cable's running max
+        cur = series_ps.max()
+        prev = per_cable_max[key]
+        per_cable_max[key] = cur if np.isnan(prev) else max(prev, cur)
+
+    # Build a one-column DataFrame in preserved order
+    values = [per_cable_max[k] for k in order]
+    return pd.DataFrame({"value_ps": values})
+
 
 def _collect_zo_values(cables, category: str, metric: str, end: str) -> pd.DataFrame:
     """
@@ -471,6 +508,162 @@ def _collect_zo_values(cables, category: str, metric: str, end: str) -> pd.DataF
             col = pd.to_numeric(df[metric], errors="coerce").dropna()
             if not col.empty:
                 values.extend(col.tolist())
+    return pd.DataFrame({"value": values})
+import pandas as pd
+import numpy as np
+import numpy as np
+import pandas as pd
+from collections import OrderedDict
+import numpy as np
+import pandas as pd
+def collect_zo_min_values_df(
+    cables,
+    category: str,
+    metric: str,
+    end: str,
+    key_fn=None,
+) -> pd.DataFrame:
+    """
+    Return a one-column DataFrame ('value') with the maximum Zo value per cable.
+    - One row per cable (in first-seen order from _iter_si_tests).
+    - Multiple matching tests per cable are reduced via max.
+    - Cables with no valid values produce NaN.
+
+    Parameters
+    ----------
+    cables : iterable
+        Input consumed by _iter_si_tests(cables), which yields (cable, test).
+    category : str
+        e.g. 'paddleboard' | 'cable' | 'dib'
+    metric : str
+        e.g. 'max' | 'min' (column inside zo_data[category])
+    end : str
+        e.g. 'P1' | 'P2'
+    key_fn : callable(cable) -> hashable, optional
+        Provides a stable ID for grouping per cable. If None, a default tries
+        cable.serial, cable.name, cable.id, else falls back to str(cable).
+
+    Returns
+    -------
+    pd.DataFrame
+        One column named 'value', each row = maximum per cable (float).
+    """
+
+    def default_key_fn(cable):
+        for attr in ("serial", "name", "id"):
+            if hasattr(cable, attr):
+                val = getattr(cable, attr)
+                if val is not None:
+                    return val
+        return str(cable)  # last resort, must be stable across occurrences
+
+    key_fn = key_fn or default_key_fn
+
+    per_cable_min = {}  # key -> float (nan initially)
+    order = []          # preserve first-seen order of distinct cables
+
+    for cable, test in _iter_si_tests(cables):
+        key = key_fn(cable)
+
+        # Ensure cable appears (even if this test won't match)
+        if key not in per_cable_min:
+            per_cable_min[key] = np.nan
+            order.append(key)
+
+        # Filter by end
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+
+        # Pull Zo table
+        z = getattr(test, "zo_data", None)
+        if not isinstance(z, dict):
+            continue
+
+        df = z.get(category)
+        if isinstance(df, pd.DataFrame) and metric in df.columns:
+            col = pd.to_numeric(df[metric], errors="coerce").dropna()
+            if not col.empty:
+                cur = col.min()
+                prev = per_cable_min[key]
+                per_cable_min[key] = cur if np.isnan(prev) else max(prev, cur)
+
+    # Build a one-column DataFrame in the preserved order
+    values = [per_cable_min[k] for k in order]
+    return pd.DataFrame({"value": values})
+
+def collect_zo_max_values_df(
+    cables,
+    category: str,
+    metric: str,
+    end: str,
+    key_fn=None,
+) -> pd.DataFrame:
+    """
+    Return a one-column DataFrame ('value') with the maximum Zo value per cable.
+    - One row per cable (in first-seen order from _iter_si_tests).
+    - Multiple matching tests per cable are reduced via max.
+    - Cables with no valid values produce NaN.
+
+    Parameters
+    ----------
+    cables : iterable
+        Input consumed by _iter_si_tests(cables), which yields (cable, test).
+    category : str
+        e.g. 'paddleboard' | 'cable' | 'dib'
+    metric : str
+        e.g. 'max' | 'min' (column inside zo_data[category])
+    end : str
+        e.g. 'P1' | 'P2'
+    key_fn : callable(cable) -> hashable, optional
+        Provides a stable ID for grouping per cable. If None, a default tries
+        cable.serial, cable.name, cable.id, else falls back to str(cable).
+
+    Returns
+    -------
+    pd.DataFrame
+        One column named 'value', each row = maximum per cable (float).
+    """
+
+    def default_key_fn(cable):
+        for attr in ("serial", "name", "id"):
+            if hasattr(cable, attr):
+                val = getattr(cable, attr)
+                if val is not None:
+                    return val
+        return str(cable)  # last resort, must be stable across occurrences
+
+    key_fn = key_fn or default_key_fn
+
+    per_cable_max = {}  # key -> float (nan initially)
+    order = []          # preserve first-seen order of distinct cables
+
+    for cable, test in _iter_si_tests(cables):
+        key = key_fn(cable)
+
+        # Ensure cable appears (even if this test won't match)
+        if key not in per_cable_max:
+            per_cable_max[key] = np.nan
+            order.append(key)
+
+        # Filter by end
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+
+        # Pull Zo table
+        z = getattr(test, "zo_data", None)
+        if not isinstance(z, dict):
+            continue
+
+        df = z.get(category)
+        if isinstance(df, pd.DataFrame) and metric in df.columns:
+            col = pd.to_numeric(df[metric], errors="coerce").dropna()
+            if not col.empty:
+                cur = col.max()
+                prev = per_cable_max[key]
+                per_cable_max[key] = cur if np.isnan(prev) else max(prev, cur)
+
+    # Build a one-column DataFrame in the preserved order
+    values = [per_cable_max[k] for k in order]
     return pd.DataFrame({"value": values})
 
 def _histogram(values_df: pd.DataFrame, title: str, x_label: str = "Impedance"):
@@ -973,11 +1166,7 @@ st.dataframe(zo_overall_df, use_container_width=True)
 st.markdown("#### Skew (Δ) — Executive Summary")
 st.dataframe(skew_overall_df, use_container_width=True)
 
-st.caption(
-    "Cable pass rule: a cable passes if **all** of its channels meet the spec within each slice; "
-    "overall results require passing across all slices where the cable has data. "
-    "Cables with no data for a slice are not penalized."
-)
+
 # =================================================================
 st.subheader("Zo Histograms")
 
@@ -1001,7 +1190,18 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
                 
                 # --- Max ---
                 df_max = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="max", end=end)
-                _histogram(df_max, title=f"{cat_label} — {end} — Max Impedance", x_label="Max Impedance")
+                #switch this to be the maximum from each cable not all the maximums 
+
+                df_max_per_cable = collect_zo_max_values_df(
+                    st.session_state["cables"],
+                    category=cat_key,
+                    metric="max",
+                    end=end,
+                    # If you have a known unique attribute, uncomment and set it explicitly:
+                    # key_fn=lambda c: c.serial
+                )
+
+                _histogram(df_max_per_cable, title=f"{cat_label} — {end} — Max Impedance", x_label="Max Impedance")
 
                 # New: collect with serial for cable-level counts
                 df_max_s = _collect_zo_values_with_serial(
@@ -1042,7 +1242,17 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
 
                 # --- Min ---
                 df_min = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="min", end=end)
-                _histogram(df_min, title=f"{cat_label} — {end} — Min Impedance", x_label="Min Impedance")
+                df_min_per_cable = collect_zo_min_values_df(
+                    st.session_state["cables"],
+                    category=cat_key,
+                    metric="min",
+                    end=end,
+                    # If you have a known unique attribute, uncomment and set it explicitly:
+                    # key_fn=lambda c: c.serial
+                )
+
+                _histogram(df_min_per_cable, title=f"{cat_label} — {end} — Min Impedance", x_label="Min Impedance")
+
 
                 # New: collect with serial for cable-level counts
                 df_min_s = _collect_zo_values_with_serial(
@@ -1098,7 +1308,7 @@ for i, end in enumerate(ends):
             st.info(f"No data for Skew — {end} — Δ (pS)")
         else:
             # Histogram (channels)
-            fig = px.histogram(df_delta, x="value_ps", nbins=30, title=f"Skew — {end} — Δ (pS)")
+            fig = px.histogram(df_delta, x="value_ps", nbins=30, title=f"Maximum Skew — {end} — Δ (pS)")
             fig.update_layout(
                 bargap=0.05,
                 xaxis_title="Δ skew [pS]",

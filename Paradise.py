@@ -57,6 +57,9 @@ class Paradise(Cable):
         re.VERBOSE
     )
 
+    def __hash__(self):
+        return hash(self.serial_number)
+
     @property
     def type(self):
         return "paradise"
