@@ -54,6 +54,9 @@ def ensure_state():
 # At top of file (near other imports):
 from dataclasses import Field as DataclassField
 
+
+st.set_page_config(page_title="SI Tools", page_icon = "🐍", layout="wide")
+
 def migrate_si_tests_traces():
     """
     Normalize all SI_Test.traces to a dict for existing objects in session_state.
@@ -484,7 +487,6 @@ def _histogram(values_df: pd.DataFrame, title: str, x_label: str = "Impedance"):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-st.set_page_config(page_title="SI Tools", page_icon = "🐍", layout="wide")
 uploaded_files = st.file_uploader("Upload your SI files", type="DAT", accept_multiple_files=True)
 
 cables = st.session_state["cables"]
@@ -519,8 +521,464 @@ if uploaded_files:
     #i want to make a histogram with maximum impedance, minimum impedance , for each paddleboard, cable, dib
     # do the same thing for P1 and P2 if they are present 
 
-        
+      # --- Zo Spec Controls (place near the top or sidebar) ---
+
+# Default/spec persistence
+if "zo_target_ohm" not in st.session_state:
+    st.session_state["zo_target_ohm"] = 50.0
+if "zo_tol_current_ohm" not in st.session_state:
+    st.session_state["zo_tol_current_ohm"] = 5.0
+if "zo_tol_proposed_ohm" not in st.session_state:
+    st.session_state["zo_tol_proposed_ohm"] = st.session_state["zo_tol_current_ohm"]
+
+if "zo_min_current_ohm" not in st.session_state:
+    st.session_state["zo_min_current_ohm"] = 45.0
+if "zo_max_current_ohm" not in st.session_state:
+    st.session_state["zo_max_current_ohm"] = 55.0
+if "zo_min_proposed_ohm" not in st.session_state:
+    st.session_state["zo_min_proposed_ohm"] = st.session_state["zo_min_current_ohm"]
+if "zo_max_proposed_ohm" not in st.session_state:
+    st.session_state["zo_max_proposed_ohm"] = st.session_state["zo_max_current_ohm"]
+
+if "skew_current_spec_ps" not in st.session_state:
+    st.session_state["skew_current_spec_ps"] = 23
+if "skew_tol_proposed" not in st.session_state:
+    st.session_state["skew_tol_proposed"] = 23
+
+zo_target_ohm = 50.0
+
+zo_tol_curr_ohm = 5
+# --- Helpers to collect values WITH serials ---
+
+def _collect_zo_values_with_serial(cables, category: str, metric: str, end: str) -> pd.DataFrame:
+    """
+    Return rows with columns ['serial', 'value'] for the requested Zo slice.
+    """
+    rows = []
+    for cable, test in _iter_si_tests(cables):
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+        z = getattr(test, "zo_data", None)
+        if not isinstance(z, dict):
+            continue
+        df = z.get(category)
+        if isinstance(df, pd.DataFrame) and metric in df.columns:
+            col = pd.to_numeric(df[metric], errors="coerce").dropna()
+            if not col.empty:
+                sn = getattr(cable, "serial_number", "?")
+                rows.extend({"serial": sn, "value": float(v)} for v in col.tolist())
+    return pd.DataFrame(rows, columns=["serial", "value"])
+
+
+def _collect_skew_delta_with_serial(cables, end: str) -> pd.DataFrame:
+    """
+    Return rows with columns ['serial', 'value_ps'] for Δ skew (converted to pS).
+    """
+    rows = []
+    for cable, test in _iter_si_tests(cables):
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+        df = getattr(test, "skew_data", None)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            dcol = next((c for c in df.columns if str(c).strip().lower() == "delta"), None)
+            if dcol:
+                s = pd.to_numeric(df[dcol], errors="coerce").dropna() * 1000.0  # nS -> pS
+                if not s.empty:
+                    sn = getattr(cable, "serial_number", "?")
+                    rows.extend({"serial": sn, "value_ps": float(v)} for v in s.tolist())
+    return pd.DataFrame(rows, columns=["serial", "value_ps"])
+def _zo_counts_by_cable(
+    df: pd.DataFrame,
+    target: float,
+    tol_curr: float,
+    tol_prop: float,
+    value_col: str = "value",
+    serial_col: str = "serial",
+    per_cable_rule: str = "all_channels",  # or "any_channel"
+):
+    """
+    Count pass/fail at the **cable** level for Zo using target ± tolerance.
+
+    Returns: dict with counts of cables (not channels).
+    """
+    # Basic guards
+    if df is None or df.empty or value_col not in df.columns or serial_col not in df.columns:
+        return dict(total=0, pass_current=0, fail_current=0, pass_prop=0, fail_prop=0)
+
+    # Clean values
+    vals = pd.to_numeric(df[value_col], errors="coerce")
+    ser = df[serial_col]
+    mask = vals.notna() & ser.notna()
+    vals = vals[mask]
+    ser = ser[mask]
+
+    if vals.empty:
+        return dict(total=0, pass_current=0, fail_current=0, pass_prop=0, fail_prop=0)
+
+    dev = (vals - float(target)).abs()
+    ok_curr = dev <= float(tol_curr)
+    ok_prop = dev <= float(tol_prop)
+
+    if per_cable_rule == "all_channels":
+        pass_curr_by_cable = ok_curr.groupby(ser).all()
+        pass_prop_by_cable = ok_prop.groupby(ser).all()
+    elif per_cable_rule == "any_channel":
+        pass_curr_by_cable = ok_curr.groupby(ser).any()
+        pass_prop_by_cable = ok_prop.groupby(ser).any()
+    else:
+        raise ValueError("per_cable_rule must be 'all_channels' or 'any_channel'")
+
+    total_cables = int(pass_curr_by_cable.size)  # number of cables present
+    pass_current = int(pass_curr_by_cable.sum())
+    pass_prop    = int(pass_prop_by_cable.sum())
+
+    fail_current = total_cables - pass_current
+    fail_prop    = total_cables - pass_prop
+
+    return dict(
+        total=total_cables,
+        pass_current=pass_current,
+        fail_current=fail_current,
+        pass_prop=pass_prop,
+        fail_prop=fail_prop,
+    )
+
+def _skew_counts_by_cable(
+    df: pd.DataFrame,
+    curr_ps: float,
+    prop_ps: float,
+    value_col: str = "value_ps",
+    serial_col: str = "serial",
+    per_cable_rule: str = "all_channels",  # or "any_channel"
+) -> dict:
+    """
+    Count pass/fail at the **cable** level for skew, using absolute Δ skew thresholds.
+
+    Cable pass rule:
+      - 'all_channels': cable passes if ALL its channels meet |Δ skew| <= threshold
+      - 'any_channel' : cable passes if ANY of its channels meets the threshold
+    """
+    if df is None or df.empty or value_col not in df.columns or serial_col not in df.columns:
+        return dict(total=0, pass_current=0, fail_current=0, pass_prop=0, fail_prop=0)
+
+    vals = pd.to_numeric(df[value_col], errors="coerce")
+    ser = df[serial_col]
+    mask = vals.notna() & ser.notna()
+    vals = vals[mask].abs()  # absolute Δ skew in pS
+    ser = ser[mask]
+
+    if vals.empty:
+        return dict(total=0, pass_current=0, fail_current=0, pass_prop=0, fail_prop=0)
+
+    ok_curr = vals <= float(curr_ps)
+    ok_prop = vals <= float(prop_ps)
+
+    if per_cable_rule == "all_channels":
+        pass_curr_by_cable = ok_curr.groupby(ser).all()
+        pass_prop_by_cable = ok_prop.groupby(ser).all()
+    elif per_cable_rule == "any_channel":
+        pass_curr_by_cable = ok_curr.groupby(ser).any()
+        pass_prop_by_cable = ok_prop.groupby(ser).any()
+    else:
+        raise ValueError("per_cable_rule must be 'all_channels' or 'any_channel'")
+
+    total_cables = int(pass_curr_by_cable.size)
+    pass_current = int(pass_curr_by_cable.sum())
+    pass_prop    = int(pass_prop_by_cable.sum())
+    fail_current = total_cables - pass_current
+    fail_prop    = total_cables - pass_prop
+
+    return dict(
+        total=total_cables,
+        pass_current=pass_current,
+        fail_current=fail_current,
+        pass_prop=pass_prop,
+        fail_prop=fail_prop,
+    )
+
+#add two executive summary tables here : 
+#impedance maximum and minimum 
+# skew change 
+# ===================== EXECUTIVE SUMMARY =====================
 st.divider()
+st.subheader("Executive Summary (Cable-Level)")
+
+# --- Config ---
+categories = [
+    ("paddleboard", "Paddleboard"),
+    ("cable",       "Cable"),
+    ("dib",         "DIB"),
+]
+ends = ["P1", "P2"]
+
+# ---------------- Proposed Spec Editors (editable) ----------------
+# Initialize proposed values in session_state once
+st.session_state.setdefault(
+    "zo_tol_proposed_max_ohm",
+    float(st.session_state.get("zo_tol_current_ohm", 5.0))
+)
+st.session_state.setdefault(
+    "zo_tol_proposed_min_ohm",
+    float(st.session_state.get("zo_tol_current_ohm", 5.0))
+)
+st.session_state.setdefault(
+    "skew_proposed_ps",
+    float(st.session_state.get("skew_current_spec_ps", 50.0))
+)
+
+# Read current values (already defined elsewhere in your app)
+zo_target_ohm   = float(st.session_state.get("zo_target_ohm", 50.0))
+zo_tol_curr_ohm = float(st.session_state.get("zo_tol_current_ohm", 5.0))
+curr_skew_ps    = float(st.session_state.get("skew_current_spec_ps", 50.0))
+
+st.divider()
+st.subheader("Proposed Specs (Editable)")
+
+# ---- Table A: Impedance (Zo) Proposed Tolerances ----
+zo_prop_df = pd.DataFrame([
+    {
+        "Metric": "Zo Max",
+        "Target (Ω)": zo_target_ohm,
+        "Current Tol (Ω)": zo_tol_curr_ohm,
+        "Proposed Tol (Ω)": float(st.session_state["zo_tol_proposed_max_ohm"]),
+    },
+    {
+        "Metric": "Zo Min",
+        "Target (Ω)": zo_target_ohm,
+        "Current Tol (Ω)": zo_tol_curr_ohm,
+        "Proposed Tol (Ω)": float(st.session_state["zo_tol_proposed_min_ohm"]),
+    },
+])
+
+zo_prop_edited = st.data_editor(
+    zo_prop_df,
+    key="zo_prop_editor",
+    num_rows="fixed",
+    hide_index=True,
+    column_config={
+        "Metric": st.column_config.TextColumn(disabled=True),
+        "Target (Ω)": st.column_config.NumberColumn(format="%.3f", disabled=True),
+        "Current Tol (Ω)": st.column_config.NumberColumn(format="%.3f", disabled=True),
+        "Proposed Tol (Ω)": st.column_config.NumberColumn(
+            format="%.3f", min_value=0.0, max_value=50.0, step=0.5
+        ),
+    },
+)
+
+# Persist edited Zo proposed tolerances (guard if user temporarily clears cells)
+try:
+    st.session_state["zo_tol_proposed_max_ohm"] = float(
+        zo_prop_edited.loc[zo_prop_edited["Metric"] == "Zo Max", "Proposed Tol (Ω)"].iloc[0]
+    )
+    st.session_state["zo_tol_proposed_min_ohm"] = float(
+        zo_prop_edited.loc[zo_prop_edited["Metric"] == "Zo Min", "Proposed Tol (Ω)"].iloc[0]
+    )
+except Exception:
+    pass
+
+# ---- Table B: Skew (Δ) Proposed Spec ----
+skew_prop_df = pd.DataFrame([
+    {
+        "Metric": "Δ Skew",
+        "Current Spec (pS)": curr_skew_ps,
+        "Proposed Spec (pS)": float(st.session_state["skew_proposed_ps"]),
+    }
+])
+
+skew_prop_edited = st.data_editor(
+    skew_prop_df,
+    key="skew_prop_editor",
+    num_rows="fixed",
+    hide_index=True,
+    column_config={
+        "Metric": st.column_config.TextColumn(disabled=True),
+        "Current Spec (pS)": st.column_config.NumberColumn(format="%.0f", disabled=True),
+        "Proposed Spec (pS)": st.column_config.NumberColumn(
+            format="%.0f", min_value=0.0, max_value=100000.0, step=1.0
+        ),
+    },
+)
+
+# Persist edited Skew proposed spec
+try:
+    st.session_state["skew_proposed_ps"] = float(skew_prop_edited.at[0, "Proposed Spec (pS)"])
+except Exception:
+    pass
+
+st.divider()
+
+# ---------------- Build the two Executive Summary tables ----------------
+# Helpers (with serials) — define if not already present in your file
+def _collect_zo_values_with_serial(cables, category: str, metric: str, end: str) -> pd.DataFrame:
+    """
+    Return rows with columns ['serial', 'value'] for Zo.
+    """
+    rows = []
+    for cable, test in _iter_si_tests(cables):
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+        z = getattr(test, "zo_data", None)
+        if not isinstance(z, dict):
+            continue
+        df = z.get(category)
+        if isinstance(df, pd.DataFrame) and metric in df.columns:
+            col = pd.to_numeric(df[metric], errors="coerce").dropna()
+            if not col.empty:
+                sn = getattr(cable, "serial_number", "?")
+                rows.extend({"serial": sn, "value": float(v)} for v in col.tolist())
+    return pd.DataFrame(rows, columns=["serial", "value"])
+
+def _collect_skew_delta_with_serial(cables, end: str) -> pd.DataFrame:
+    """
+    Return rows with columns ['serial', 'value_ps'] for Δ skew (converted to pS).
+    """
+    rows = []
+    for cable, test in _iter_si_tests(cables):
+        if getattr(test, "test_end", "").upper() != end.upper():
+            continue
+        df = getattr(test, "skew_data", None)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            dcol = next((c for c in df.columns if str(c).strip().lower() == "delta"), None)
+            if dcol:
+                s = pd.to_numeric(df[dcol], errors="coerce").dropna() * 1000.0  # nS -> pS
+                if not s.empty:
+                    sn = getattr(cable, "serial_number", "?")
+                    rows.extend({"serial": sn, "value_ps": float(v)} for v in s.tolist())
+    return pd.DataFrame(rows, columns=["serial", "value_ps"])
+
+def _reduce_and(series_list: list[pd.Series]) -> pd.Series:
+    """Per-cable AND across slices; if a cable appears, it must pass in every slice it appears."""
+    if not series_list:
+        return pd.Series(dtype=bool)
+    return pd.concat(series_list, axis=1).all(axis=1)
+
+# ---- Impedance (Zo) — Cable-level Executive Summary (Max & Min)
+def _zo_exec_summary_tables_tol_only():
+    pass_curr_list_max, pass_prop_list_max = [], []
+    pass_curr_list_min, pass_prop_list_min = [], []
+
+    for cat_key, _cat_label in categories:
+        for end in ends:
+            # MAX
+            df_max_s = _collect_zo_values_with_serial(st.session_state["cables"], category=cat_key, metric="max", end=end)
+            if df_max_s is not None and not df_max_s.empty:
+                vals = pd.to_numeric(df_max_s["value"], errors="coerce")
+                ser  = df_max_s["serial"]
+                m    = vals.notna() & ser.notna()
+                vals, ser = vals[m], ser[m]
+                dev = (vals - zo_target_ohm).abs()
+                ok_curr = (dev <= zo_tol_curr_ohm).groupby(ser).all()
+                ok_prop = (dev <= float(st.session_state["zo_tol_proposed_max_ohm"])).groupby(ser).all()
+                pass_curr_list_max.append(ok_curr)
+                pass_prop_list_max.append(ok_prop)
+
+            # MIN
+            df_min_s = _collect_zo_values_with_serial(st.session_state["cables"], category=cat_key, metric="min", end=end)
+            if df_min_s is not None and not df_min_s.empty:
+                vals = pd.to_numeric(df_min_s["value"], errors="coerce")
+                ser  = df_min_s["serial"]
+                m    = vals.notna() & ser.notna()
+                vals, ser = vals[m], ser[m]
+                dev = (vals - zo_target_ohm).abs()
+                ok_curr = (dev <= zo_tol_curr_ohm).groupby(ser).all()
+                ok_prop = (dev <= float(st.session_state["zo_tol_proposed_min_ohm"])).groupby(ser).all()
+                pass_curr_list_min.append(ok_curr)
+                pass_prop_list_min.append(ok_prop)
+
+    # Reduce across every Category×End slice per metric
+    max_curr_all = _reduce_and(pass_curr_list_max)
+    max_prop_all = _reduce_and(pass_prop_list_max)
+    min_curr_all = _reduce_and(pass_curr_list_min)
+    min_prop_all = _reduce_and(pass_prop_list_min)
+
+    def _counts(sr: pd.Series):
+        total = int(sr.size)
+        passed = int(sr.sum())
+        return total, passed, total - passed
+
+    total_max, pass_max_curr, fail_max_curr = _counts(max_curr_all)
+    _,        pass_max_prop, fail_max_prop  = _counts(max_prop_all)
+    total_min, pass_min_curr, fail_min_curr = _counts(min_curr_all)
+    _,        pass_min_prop, fail_min_prop  = _counts(min_prop_all)
+
+    zo_overall_df = pd.DataFrame([
+        {
+            "Metric": "Zo Max",
+            "Current Spec": f"Target {zo_target_ohm} Ω, ±{zo_tol_curr_ohm} Ω",
+            "Proposed Spec": f"Target {zo_target_ohm} Ω, ±{st.session_state['zo_tol_proposed_max_ohm']} Ω",
+            "Cables — Pass (Current)": pass_max_curr,
+            "Cables — Fail (Current)": fail_max_curr,
+            "Cables — Pass (Proposed)": pass_max_prop,
+            "Cables — Fail (Proposed)": fail_max_prop,
+            "Cables — Total": total_max,
+        },
+        {
+            "Metric": "Zo Min",
+            "Current Spec": f"Target {zo_target_ohm} Ω, ±{zo_tol_curr_ohm} Ω",
+            "Proposed Spec": f"Target {zo_target_ohm} Ω, ±{st.session_state['zo_tol_proposed_min_ohm']} Ω",
+            "Cables — Pass (Current)": pass_min_curr,
+            "Cables — Fail (Current)": fail_min_curr,
+            "Cables — Pass (Proposed)": pass_min_prop,
+            "Cables — Fail (Proposed)": fail_min_prop,
+            "Cables — Total": total_min,
+        },
+    ])
+    return zo_overall_df
+
+# ---- Skew (Δ) — Cable-level Executive Summary (aggregated across ends)
+def _skew_exec_summary_table_tol_only():
+    per_end_curr, per_end_prop = [], []
+
+    for end in ends:
+        df_s = _collect_skew_delta_with_serial(st.session_state["cables"], end=end)
+        if df_s is None or df_s.empty:
+            continue
+        vals = pd.to_numeric(df_s["value_ps"], errors="coerce").abs()
+        ser  = df_s["serial"]
+        m    = vals.notna() & ser.notna()
+        vals, ser = vals[m], ser[m]
+        ok_curr = (vals <= curr_skew_ps).groupby(ser).all()
+        ok_prop = (vals <= float(st.session_state["skew_proposed_ps"])).groupby(ser).all()
+        per_end_curr.append(ok_curr)
+        per_end_prop.append(ok_prop)
+
+    curr_all = _reduce_and(per_end_curr)
+    prop_all = _reduce_and(per_end_prop)
+
+    total     = int(curr_all.size)
+    pass_curr = int(curr_all.sum())
+    fail_curr = total - pass_curr
+    pass_prop = int(prop_all.sum())
+    fail_prop = total - pass_prop
+
+    skew_overall_df = pd.DataFrame([{
+        "Metric": "Δ Skew",
+        "Current Spec": f"±{curr_skew_ps} pS",
+        "Proposed Spec": f"±{st.session_state['skew_proposed_ps']} pS",
+        "Cables — Pass (Current)": pass_curr,
+        "Cables — Fail (Current)": fail_curr,
+        "Cables — Pass (Proposed)": pass_prop,
+        "Cables — Fail (Proposed)": fail_prop,
+        "Cables — Total": total,
+    }])
+    return skew_overall_df
+
+# ---- Render both Executive Summary tables ----
+zo_overall_df   = _zo_exec_summary_tables_tol_only()
+skew_overall_df = _skew_exec_summary_table_tol_only()
+
+st.markdown("#### Impedance (Zo) — Executive Summary")
+st.dataframe(zo_overall_df, use_container_width=True)
+
+st.markdown("#### Skew (Δ) — Executive Summary")
+st.dataframe(skew_overall_df, use_container_width=True)
+
+st.caption(
+    "Cable pass rule: a cable passes if **all** of its channels meet the spec within each slice; "
+    "overall results require passing across all slices where the cable has data. "
+    "Cables with no data for a slice are not penalized."
+)
+# =================================================================
 st.subheader("Zo Histograms")
 
 categories = [
@@ -528,10 +986,10 @@ categories = [
     ("cable",       "Cable"),
     ("dib",         "DIB"),
 ]
-
 ends = ["P1", "P2"]  # will quietly show "No data" when an end isn’t present
 
-# Layout: Tabs per category, inside each: two columns per end, with Max/Min stacked.
+
+
 tabs = st.tabs([label for _, label in categories])
 for (cat_key, cat_label), tab in zip(categories, tabs):
     with tab:
@@ -540,14 +998,93 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
         for i, end in enumerate(ends):
             with cols[i]:
                 st.markdown(f"##### End: {end}")
-                # Max
+                
+                # --- Max ---
                 df_max = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="max", end=end)
                 _histogram(df_max, title=f"{cat_label} — {end} — Max Impedance", x_label="Max Impedance")
-                # Min
+
+                # New: collect with serial for cable-level counts
+                df_max_s = _collect_zo_values_with_serial(
+                    st.session_state["cables"], category=cat_key, metric="max", end=end
+                )
+
+                if df_max_s is None or df_max_s.empty:
+                    st.info("No Max data")
+                else:
+                    zo_tol_prop_ohm = st.number_input(
+                        "Proposed tolerance [Ω]",
+                        key=f"zo_tol_prop_{cat_key}_{end}_max",
+                        min_value=0.0,
+                        max_value=50.0,
+                        value=float(st.session_state["zo_tol_proposed_ohm"]),
+                        step=0.5,
+                    )
+
+                    # Choose rule: "all_channels" (default) or "any_channel"
+                    # You can also expose this via a widget if you want
+                    counts = _zo_counts_by_cable(
+                        df_max_s,
+                        target=zo_target_ohm,
+                        tol_curr=zo_tol_curr_ohm,
+                        tol_prop=zo_tol_prop_ohm,
+                        value_col="value",
+                        serial_col="serial",
+                        per_cable_rule="all_channels",
+                    )
+
+                    c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
+                    c1.metric("Cables — Total", counts["total"])
+                    c2.metric("Cables — Pass (Current)", counts["pass_current"])
+                    c3.metric("Cables — Fail (Current)", counts["fail_current"])
+                    c4.metric("Cables — Pass (Proposed)", counts["pass_prop"])
+                    c5.metric("Cables — Fail (Proposed)", counts["fail_prop"])
+                    st.caption(f"Spec — Current: Target {zo_target_ohm} Ω ±{zo_tol_curr_ohm} Ω | Proposed: ±{zo_tol_prop_ohm} Ω")
+
+                # --- Min ---
                 df_min = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="min", end=end)
                 _histogram(df_min, title=f"{cat_label} — {end} — Min Impedance", x_label="Min Impedance")
 
+                # New: collect with serial for cable-level counts
+                df_min_s = _collect_zo_values_with_serial(
+                    st.session_state["cables"], category=cat_key, metric="min", end=end
+                )
+
+                if df_min_s is None or df_min_s.empty:
+                    st.info("No Min data")
+                else:
+                    zo_tol_prop_ohm = st.number_input(
+                        "Proposed tolerance [Ω]",
+                        key=f"zo_tol_prop_{cat_key}_{end}_min",
+                        min_value=0.0,
+                        max_value=50.0,
+                        value=float(st.session_state["zo_tol_proposed_ohm"]),
+                        step=0.5,
+                    )
+
+                    counts = _zo_counts_by_cable(
+                        df_min_s,
+                        target=zo_target_ohm,
+                        tol_curr=zo_tol_curr_ohm,
+                        tol_prop=zo_tol_prop_ohm,
+                        value_col="value",
+                        serial_col="serial",
+                        per_cable_rule="all_channels",
+                    )
+
+                    c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
+                    c1.metric("Cables — Total", counts["total"])
+                    c2.metric("Cables — Pass (Current)", counts["pass_current"])
+                    c3.metric("Cables — Fail (Current)", counts["fail_current"])
+                    c4.metric("Cables — Pass (Proposed)", counts["pass_prop"])
+                    c5.metric("Cables — Fail (Proposed)", counts["fail_prop"])
+                    st.caption(f"Spec — Current: Target {zo_target_ohm} Ω ±{zo_tol_curr_ohm} Ω | Proposed: ±{zo_tol_prop_ohm} Ω")
+
+# Global summary across all slices
+
+
 st.divider()
+
+
 st.subheader("Skew Histograms (Δ skew [pS])")
 
 ends = ["P1", "P2"]
@@ -555,10 +1092,12 @@ cols = st.columns(2)
 
 for i, end in enumerate(ends):
     with cols[i]:
-        df_delta = _collect_skew_delta(st.session_state["cables"], end=end)
+        df_delta = _collect_skew_delta(st.session_state["cables"], end=end)  # for histogram (channels)
+        df_delta_s = _collect_skew_delta_with_serial(st.session_state["cables"], end=end)
         if df_delta.empty:
             st.info(f"No data for Skew — {end} — Δ (pS)")
         else:
+            # Histogram (channels)
             fig = px.histogram(df_delta, x="value_ps", nbins=30, title=f"Skew — {end} — Δ (pS)")
             fig.update_layout(
                 bargap=0.05,
@@ -568,8 +1107,54 @@ for i, end in enumerate(ends):
                 template="plotly_white",
             )
             st.plotly_chart(fig, use_container_width=True)
+            proposed_skew_ps = st.number_input(
+                "Proposed tolerance [pS]",
+                key=f"skew_tol_prop_{cat_key}_{end}_ps",
+                min_value=0.0,
+                max_value=50.0,
+                value=float(st.session_state["skew_tol_proposed"]),
+                step=0.5,
+                )
 
-        
+            # Specs
+            current_spec_ps = st.session_state["skew_current_spec_ps"]
+            proposed_spec_ps = proposed_skew_ps
+
+            # ----- Cable-level counts -----
+            if df_delta_s is None or df_delta_s.empty:
+                st.info("No cable-level skew data available.")
+            else:
+                # Choose rule: "all_channels" (default) or "any_channel"
+                cable_rule = "all_channels"
+
+                c_counts = _skew_counts_by_cable(
+                    df_delta_s,
+                    curr_ps=current_spec_ps,
+                    prop_ps=proposed_spec_ps,
+                    value_col="value_ps",
+                    serial_col="serial",
+                    per_cable_rule=cable_rule,
+                )
+
+                mcol1, mcol2, mcol3, mcol4 = st.columns([1,1,1,1])
+                mcol1.metric(label=f"{end} Δ skew — Cables Total", value=c_counts["total"])
+                mcol2.metric(label=f"{end} Δ skew — Cables Pass (Current ±{current_spec_ps} pS)", value=c_counts["pass_current"])
+                mcol3.metric(label=f"{end} Δ skew — Cables Fail (Current)", value=c_counts["fail_current"])
+                mcol4.metric(label=f"{end} Δ skew — Cables Fail (Proposed ±{proposed_spec_ps} pS)", value=c_counts["fail_prop"])
+
+                st.caption(f"Cable rule: {'All channels must pass' if cable_rule=='all_channels' else 'Any channel may pass'}")
+                st.dataframe(
+                    {
+                        "Spec": ["Current", "Proposed"],
+                        "Cable Pass": [c_counts["pass_current"], c_counts["pass_prop"]],
+                        "Cable Fail": [c_counts["fail_current"], c_counts["fail_prop"]],
+                        "Cables Total": [c_counts["total"], c_counts["total"]],
+                    },
+                    use_container_width=True
+                )
+
+
+      
 st.divider()
 st.subheader("Download CSVs")
 
@@ -604,7 +1189,6 @@ for cat_key, cat_label in zo_categories:
                             use_container_width=True
                         )
 
-# SKEW: per end (P1/P2), values = delta
 with st.expander("Skew — Δ (pS)", expanded=False):
     cols = st.columns(2)
     for i, end in enumerate(ends):
