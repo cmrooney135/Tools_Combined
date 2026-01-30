@@ -157,6 +157,55 @@ def _classify_failure(detail: str) -> str:
         if re.search(pat, s):
             return cat
     return "Other"
+from typing import Tuple
+
+def split_by_expected_groups(
+    df_long: pd.DataFrame,
+    *,
+    expected_col: str = "Expected",
+    low_target: float = 140.0,
+    high_target: float = 500.0,
+    method: str = "nearest",          # "exact" | "nearest" | "threshold"
+    threshold: float | None = None,   # default midpoint if None (for "threshold")
+    prefer_high_on_tie: bool = True,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split long-form resistance data by Expected value into (df_high, df_low).
+
+    - exact:     uses Expected == 140/500 only.
+    - nearest:   assigns by whichever target 140/500 is closer to (robust to 139.9 / 499.8, etc).
+    - threshold: uses a single cutoff, default midpoint (320).
+    """
+    if df_long.empty or expected_col not in df_long.columns:
+        return pd.DataFrame(), pd.DataFrame()
+
+    exp = pd.to_numeric(df_long[expected_col], errors="coerce")
+    valid = df_long[exp.notna()].copy()
+    if valid.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    if method == "exact":
+        df_low  = valid[exp == low_target].copy()
+        df_high = valid[exp == high_target].copy()
+        return df_high, df_low
+
+    if method == "threshold":
+        thr = threshold if threshold is not None else (low_target + high_target) / 2.0
+        df_high = valid[exp >= thr].copy()
+        df_low  = valid[exp <  thr].copy()
+        return df_high, df_low
+
+    # default: nearest
+    d_low  = (exp - low_target).abs()
+    d_high = (exp - high_target).abs()
+    if prefer_high_on_tie:
+        high_mask = d_high <= d_low
+    else:
+        high_mask = d_high < d_low
+
+    df_high = valid[high_mask].copy()
+    df_low  = valid[~high_mask].copy()
+    return df_high, df_low
 
 def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd.DataFrame:
     if not hasattr(test_obj, "data") or not isinstance(test_obj.data, pd.DataFrame):
@@ -175,14 +224,13 @@ def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd
         )
         return pd.DataFrame()
 
-    # ✅ More flexible measured-column resolution
+    # ✅ Flexible measured-column resolution
     measured_candidates = [
         "Measured",                 # already normalized upstream
         "Measured_R (mOhm)",        # resistance/continuity
-        "Measured_pA",          # leakage in microamps
-        "Measured_pA",          # leakage with mu-symbol
+        "Measured_pA",              # leakage
         "Measured_I",               # generic current
-        "Value",                    # last resort, if your parser uses a generic name
+        "Value",                    # last resort
     ]
     meas_col = next((c for c in measured_candidates if c in df.columns), None)
     if not meas_col:
@@ -195,13 +243,27 @@ def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd
     serial, test_time = get_serial_and_time_from_objects(cable_obj, test_obj)
     cable_type = getattr(cable_obj, "type", None)
 
-    out = df.loc[:, ["Channel", meas_col]].copy()
+    # ---- build output ----
+    cols = ["Channel", meas_col]
+    # 👇 include Expected_R if present
+    has_expected = "Expected_R (mOhm)" in df.columns
+    if has_expected:
+        cols.append("Expected_R (mOhm)")
+
+    out = df.loc[:, cols].copy()
     out.rename(columns={meas_col: "Measured"}, inplace=True)
+
+    # 👇 normalize numeric
+    out["Measured"] = pd.to_numeric(out["Measured"], errors="coerce")
+    if has_expected:
+        out["Expected"] = pd.to_numeric(out["Expected_R (mOhm)"], errors="coerce")
+        # Keep original too if you want; otherwise you can drop the source:
+        # out.drop(columns=["Expected_R (mOhm)"], inplace=True)
+
     out["TestType"] = ttype
     out["CableSerial"] = serial
     out["TestTime"] = test_time
     out["CableType"] = cable_type
-    out["Measured"] = pd.to_numeric(out["Measured"], errors="coerce")
     return out
 
 def normalize_failures_minimal(cable_obj, test_obj, run_header: str | None = None, source_name: str | None = None) -> pd.DataFrame:
@@ -500,15 +562,146 @@ TEST_TYPES = ["continuity", "inv_continuity", "resistance", "inv_resistance", "l
 masters = st.session_state.get("masters_by_type", {})
 
 def render_single_family():
+    """
+    Tesla single-family renderer with resistance splitting by Expected (~140 vs ~500 mΩ).
+
+    Requirements:
+      - st.session_state["masters_by_type"][ttype] is a long DataFrame containing at least:
+          ["Channel", "Measured", "CableType", "RunHeader", "CableSerial", "TestTime"]
+      - For resistance & inv_resistance splitting, an "Expected" column (float) is preferred.
+        If missing, the function will fall back to the unsplit view.
+    """
+    # Local helpers (kept inside to remain a single drop-in)
+    from typing import Tuple
+
+    def _masters():
+        return st.session_state.get("masters_by_type", {})
+
+    def _split_by_expected_groups(
+        df_long: pd.DataFrame,
+        *,
+        expected_col: str = "Expected",
+        low_target: float = 140.0,
+        high_target: float = 500.0,
+        method: str = "nearest",          # "exact" | "nearest" | "threshold"
+        threshold: float | None = None,   # default midpoint if None (for "threshold")
+        prefer_high_on_tie: bool = True,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Split long-form resistance data by Expected value into (df_high, df_low).
+        """
+        if df_long.empty or expected_col not in df_long.columns:
+            return pd.DataFrame(), pd.DataFrame()
+
+        exp = pd.to_numeric(df_long[expected_col], errors="coerce")
+        valid = df_long[exp.notna()].copy()
+        if valid.empty:
+            return pd.DataFrame(), pd.DataFrame()
+
+        if method == "exact":
+            df_low  = valid[exp == low_target].copy()
+            df_high = valid[exp == high_target].copy()
+            return df_high, df_low
+
+        if method == "threshold":
+            thr = threshold if threshold is not None else (low_target + high_target) / 2.0
+            df_high = valid[exp >= thr].copy()
+            df_low  = valid[exp <  thr].copy()
+            return df_high, df_low
+
+        # default: nearest
+        d_low  = (exp - low_target).abs()
+        d_high = (exp - high_target).abs()
+        high_mask = d_high <= d_low if prefer_high_on_tie else d_high < d_low
+        df_high = valid[high_mask].copy()
+        df_low  = valid[~high_mask].copy()
+        return df_high, df_low
+
+    def _render_failures_block(ttype: str, cable_family: str):
+        st.markdown("**Failure breakdown**")
+        failures_all = st.session_state.get("failures_by_type", {}).get(ttype, pd.DataFrame())
+
+        if failures_all.empty or "Category" not in failures_all.columns:
+            st.info("No failure records available yet.")
+            return
+
+        fct = failures_all.copy()
+
+        # Filter by cable family if the column exists
+        if "CableType" in fct.columns:
+            fam = str(cable_family).strip().lower()
+            mask = fct["CableType"].astype(str).str.strip().str.lower() == fam
+            fct = fct[mask]
+
+        if fct.empty:
+            st.info("No failures for this cable family.")
+            return
+
+        # Overall bar chart by category
+        overall = (
+            fct.groupby("Category", dropna=False)
+            .size()
+            .reset_index(name="Count")
+            .sort_values(["Count", "Category"], ascending=[False, True])
+        )
+        fig_overall = px.bar(
+            overall,
+            x="Category",
+            y="Count",
+            title=f"{cable_family.capitalize()} · {ttype} — Failures across all runs",
+            text="Count",
+        )
+        fig_overall.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=60, b=10))
+        fig_overall.update_traces(textposition="outside")
+        st.plotly_chart(fig_overall, use_container_width=True)
+
+        # Failure table
+        tbl = fct.copy()
+        has_from_to = {"FromPin", "ToPin"}.issubset(tbl.columns)
+        if has_from_to:
+            tbl["ChannelFmt"] = tbl.apply(
+                lambda r: f"({r['FromPin']}, {r['ToPin']})"
+                if (pd.notna(r.get("FromPin")) or pd.notna(r.get("ToPin"))) else None,
+                axis=1,
+            )
+        else:
+            tbl["ChannelFmt"] = None
+
+        if "Channel" in tbl.columns:
+            tbl.loc[tbl["ChannelFmt"].isna(), "ChannelFmt"] = tbl["Channel"].astype(str)
+
+        show_cols = [c for c in ["RunHeader", "ChannelFmt", "Category"] if c in tbl.columns]
+        rename_map = {"ChannelFmt": "Channel"}
+        sort_cols = [c for c in ["RunHeader", "ChannelFmt", "Category"] if c in tbl.columns]
+        if sort_cols:
+            tbl = tbl.sort_values(by=sort_cols, kind="stable")
+        tbl_view = tbl[show_cols].rename(columns=rename_map)
+
+        st.caption("Failure records (aggregated across all runs)")
+        st.dataframe(tbl_view, use_container_width=True, hide_index=True)
+
+        csv_fail = tbl_view.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download failures (CSV)",
+            data=csv_fail,
+            file_name=f"{CABLE_FAMILY}_{ttype}_failures.csv",
+            mime="text/csv",
+            key=f"download_{CABLE_FAMILY}_{ttype}_fail_tbl",
+        )
+
+    # --------- UI proper ----------
     st.markdown(f"### {CABLE_FAMILY.capitalize()}")
     cols = st.columns(2)
 
+    masters = _masters()
+
     for idx, ttype in enumerate(TEST_TYPES):
+        # Filter to this family
         df_long = masters.get(ttype, pd.DataFrame())
         if not df_long.empty and "CableType" in df_long.columns:
             df_ct = df_long[
                 df_long["CableType"].astype(str).str.strip().str.lower() == CABLE_FAMILY.lower()
-            ]
+            ].copy()
         else:
             df_ct = pd.DataFrame()
 
@@ -517,214 +710,317 @@ def render_single_family():
         with cols[idx % 2]:
             st.write(f"**{ttype}**")
 
-            if has_data:
-                wide_df = build_channel_by_run_matrix(ttype, cable_type=CABLE_FAMILY)
-                st.caption(f"{wide_df.shape[0]} channels × {max(0, wide_df.shape[1]-1)} runs")
+            if not has_data:
+                st.info("No data yet for this test type.")
+                st.download_button(
+                    label="Download master CSV",
+                    data=b"",
+                    file_name="",
+                    mime="text/csv",
+                    disabled=True,
+                    key=f"download_{CABLE_FAMILY}_{ttype}_wide"
+                )
+                continue
 
-                csv_bytes = wide_df.to_csv(index=False).encode("utf-8")
-                filename = f"{CABLE_FAMILY}_{ttype}_master_wide.csv"
-            else:
-                csv_bytes = b""
-                filename = ""
+            # ---------- resistance family: split by Expected ----------
+            if ttype in ("resistance", "inv_resistance"):
+                # Always offer the ALL download for parity
+                wide_all = build_channel_by_run_matrix(ttype, cable_type=CABLE_FAMILY)
+                st.caption(f"All data: {wide_all.shape[0]} channels × {max(0, wide_all.shape[1]-1)} runs")
+                st.download_button(
+                    label="Download master CSV (All)",
+                    data=wide_all.to_csv(index=False).encode("utf-8"),
+                    file_name=f"{CABLE_FAMILY}_{ttype}_ALL_master_wide.csv",
+                    mime="text/csv",
+                    key=f"download_{CABLE_FAMILY}_{ttype}_ALL_wide"
+                )
 
+                if "Expected" not in df_ct.columns:
+                    st.warning("No 'Expected' column found in master. Showing unsplit view for this test.")
+                    # Fallback to your original unsplit block below
+                    stats_df = _compute_run_stats(df_ct)
+                    st.caption("Per-run summary (one row per uploaded test run)")
+                    st.dataframe(stats_df, width="stretch", hide_index=True)
+
+                    # Histograms (max per run + all measurements)
+                    df_ct_clean = _df_for(ttype, CABLE_FAMILY)
+                    df_max = _max_per_run(df_ct_clean)
+
+                    if not df_max.empty:
+                        c1, c2 = st.columns([1, 1])
+                        with c1:
+                            bin_size = st.number_input(
+                                "Bin size",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="Set to 0 for auto binning.",
+                                key=f"bin_{CABLE_FAMILY}_{ttype}_unsplit_max"
+                            )
+                        with c2:
+                            overflow_val = st.number_input(
+                                "Overflow threshold",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
+                                key=f"overflow_{CABLE_FAMILY}_{ttype}_unsplit_max"
+                            )
+                        overflow = None if overflow_val == 0 else overflow_val
+                        figA = _hist(
+                            data=df_max["MaxMeasured"].to_numpy(),
+                            title=f"{CABLE_FAMILY.capitalize()} · {ttype} — Maximum per run",
+                            bin_size=bin_size if bin_size and bin_size > 0 else None,
+                            overflow=overflow,
+                            x_label="Max Measured (per run)",
+                        )
+                        st.plotly_chart(figA, width="stretch")
+                    else:
+                        st.info("No runs available for the max-per-run histogram.")
+
+                    if not df_ct_clean.empty:
+                        all_vals = df_ct_clean["Measured"].to_numpy()
+                        c1, c2 = st.columns([1, 1])
+                        with c1:
+                            bin_size_all = st.number_input(
+                                "Bin size",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="Set to 0 for auto binning.",
+                                key=f"all_bin_{CABLE_FAMILY}_{ttype}_unsplit"
+                            )
+                        with c2:
+                            overflow_val_all = st.number_input(
+                                "Overflow threshold",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
+                                key=f"all_overflow_{CABLE_FAMILY}_{ttype}_unsplit"
+                            )
+                        overflow_all = None if overflow_val_all == 0 else overflow_val_all
+
+                        st.caption(f"All measurements combined: {len(all_vals):,} points")
+                        figB = _hist(
+                            data=all_vals,
+                            title=f"{CABLE_FAMILY.capitalize()} · {ttype} — All measurements (combined)",
+                            bin_size=bin_size_all if bin_size_all and bin_size_all > 0 else None,
+                            overflow=overflow_all,
+                            x_label="Measured",
+                        )
+                        st.plotly_chart(figB, width="stretch")
+                    else:
+                        st.info("No raw measurements available to build the combined histogram.")
+
+                    # Failures block
+                    _render_failures_block(ttype, CABLE_FAMILY)
+                    continue  # finished this test type unsplit
+
+                # --- We have Expected → split ---
+                df_high, df_low = _split_by_expected_groups(
+                    df_ct, expected_col="Expected",
+                    low_target=140.0, high_target=500.0, method="nearest"
+                )
+
+                tab_low, tab_high = st.tabs(["Expected Low (~140 mΩ)", "Expected High (~500 mΩ)"])
+
+                def _render_group(df_grp: pd.DataFrame, group_key: str):
+                    if df_grp.empty:
+                        st.info("No rows in this expected group.")
+                        return
+
+                    # Group-specific wide
+                    wide = (
+                        df_grp.pivot_table(
+                            index="Channel", columns="RunHeader", values="Measured", aggfunc="first"
+                        )
+                        .reset_index()
+                    )
+                    st.caption(f"{wide.shape[0]} channels × {max(0, wide.shape[1]-1)} runs")
+                    st.download_button(
+                        label=f"Download master CSV ({group_key})",
+                        data=wide.to_csv(index=False).encode("utf-8"),
+                        file_name=f"{CABLE_FAMILY}_{ttype}_{group_key}_master_wide.csv",
+                        mime="text/csv",
+                        key=f"download_{CABLE_FAMILY}_{ttype}_{group_key}_wide"
+                    )
+
+                    # Per-run summary for the group
+                    stats_df = _compute_run_stats(df_grp)
+                    st.caption("Per-run summary (one row per uploaded test run)")
+                    st.dataframe(stats_df, width="stretch", hide_index=True)
+
+                    # Histograms: Max per run
+                    df_max = _max_per_run(df_grp)
+                    if not df_max.empty:
+                        c1, c2 = st.columns([1, 1])
+                        with c1:
+                            bin_size = st.number_input(
+                                "Bin size",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="Set to 0 for auto binning.",
+                                key=f"bin_{CABLE_FAMILY}_{ttype}_{group_key}_max"
+                            )
+                        with c2:
+                            overflow_val = st.number_input(
+                                "Overflow threshold",
+                                min_value=0.0, value=0.0, step=0.0,
+                                help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
+                                key=f"overflow_{CABLE_FAMILY}_{ttype}_{group_key}_max"
+                            )
+                        overflow = None if overflow_val == 0 else overflow_val
+                        figA = _hist(
+                            data=df_max["MaxMeasured"].to_numpy(),
+                            title=f"{CABLE_FAMILY.capitalize()} · {ttype} — Max per run ({group_key})",
+                            bin_size=bin_size if bin_size and bin_size > 0 else None,
+                            overflow=overflow,
+                            x_label="Max Measured (per run)",
+                        )
+                        st.plotly_chart(figA, width="stretch")
+                    else:
+                        st.info("No runs available for the max-per-run histogram in this group.")
+
+                    # Histograms: All measurements combined
+                    vals = df_grp["Measured"].to_numpy()
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
+                        bin_size_all = st.number_input(
+                            "Bin size (all measurements)",
+                            min_value=0.0, value=0.0, step=0.0,
+                            help="Set to 0 for auto binning.",
+                            key=f"all_bin_{CABLE_FAMILY}_{ttype}_{group_key}"
+                        )
+                    with c2:
+                        overflow_val_all = st.number_input(
+                            "Overflow threshold (all measurements)",
+                            min_value=0.0, value=0.0, step=0.0,
+                            help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
+                            key=f"all_overflow_{CABLE_FAMILY}_{ttype}_{group_key}"
+                        )
+                    overflow_all = None if overflow_val_all == 0 else overflow_val_all
+
+                    st.caption(f"All measurements combined: {len(vals):,} points")
+                    figB = _hist(
+                        data=vals,
+                        title=f"{CABLE_FAMILY.capitalize()} · {ttype} — All measurements ({group_key})",
+                        bin_size=bin_size_all if bin_size_all and bin_size_all > 0 else None,
+                        overflow=overflow_all,
+                        x_label="Measured",
+                    )
+                    st.plotly_chart(figB, width="stretch")
+
+                    # Group combined stats (nice formatting)
+                    vals_num = pd.to_numeric(pd.Series(vals), errors="coerce").to_numpy()
+                    count = int(np.sum(~np.isnan(vals_num)))
+                    mean = float(np.nanmean(vals_num)) if count > 0 else np.nan
+                    std = float(np.nanstd(vals_num, ddof=1)) if count > 1 else np.nan
+                    vmin = float(np.nanmin(vals_num)) if count > 0 else np.nan
+                    vmax = float(np.nanmax(vals_num)) if count > 0 else np.nan
+
+                    stats_df_all = pd.DataFrame(
+                        {"Metric": ["Count", "Average", "Standard deviation", "Min", "Max"],
+                         "Value": [count, mean, std, vmin, vmax]}
+                    )
+                    def _fmt_val(x):
+                        if isinstance(x, (int, np.integer)): return x
+                        try:
+                            return "" if np.isnan(x) else round(float(x), 6)
+                        except Exception:
+                            return x
+                    stats_df_all["Value"] = stats_df_all["Value"].apply(_fmt_val)
+                    st.caption("Summary statistics — all measurements (this group)")
+                    st.dataframe(stats_df_all, width="stretch", hide_index=True)
+                    st.download_button(
+                        label=f"Download combined stats (CSV) — {group_key}",
+                        data=stats_df_all.to_csv(index=False).encode("utf-8"),
+                        file_name=f"{CABLE_FAMILY}_{ttype}_{group_key}_combined_stats.csv",
+                        mime="text/csv",
+                        key=f"download_{CABLE_FAMILY}_{ttype}_{group_key}_all_stats",
+                    )
+
+                with tab_low:
+                    _render_group(df_low, "expected_low")
+
+                with tab_high:
+                    _render_group(df_high, "expected_high")
+
+                # Failure breakdown (same as your original)
+                _render_failures_block(ttype, CABLE_FAMILY)
+                continue  # finished resistance test type
+
+            # ---------- Default path (unchanged) for other test types ----------
+            wide_df = build_channel_by_run_matrix(ttype, cable_type=CABLE_FAMILY)
+            st.caption(f"{wide_df.shape[0]} channels × {max(0, wide_df.shape[1]-1)} runs")
             st.download_button(
                 label="Download master CSV",
-                data=csv_bytes,
-                file_name=filename,
+                data=wide_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"{CABLE_FAMILY}_{ttype}_master_wide.csv",
                 mime="text/csv",
-                disabled=not has_data,
                 key=f"download_{CABLE_FAMILY}_{ttype}_wide"
             )
 
-            # --- Per-run summary table ---
-            if has_data:
-                stats_df = _compute_run_stats(df_ct)
-                st.caption("Per-run summary (one row per uploaded test run)")
-                st.dataframe(
-                    stats_df,
-                    width="stretch",            # <-- was use_container_width=True
-                    hide_index=True
-                )
-            else:
-                st.info("No data yet for this test type.")
+            # Per-run summary
+            stats_df = _compute_run_stats(df_ct)
+            st.caption("Per-run summary (one row per uploaded test run)")
+            st.dataframe(stats_df, width="stretch", hide_index=True)
 
-            # --- Histograms + controls ---
-            if has_data:
-                st.markdown("**Histograms**")
-                c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+            # Histograms (max per run)
+            df_ct_clean = _df_for(ttype, CABLE_FAMILY)
+            df_max = _max_per_run(df_ct_clean)
 
+            if not df_max.empty:
+                c1, c2 = st.columns([1, 1])
                 with c1:
                     bin_size = st.number_input(
                         "Bin size",
                         min_value=0.0, value=0.0, step=0.0,
-                        help="Set to 0 for auto binning. Units match the 'Measured' column.",
-                        key=f"bin_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY
+                        help="Set to 0 for auto binning.",
+                        key=f"bin_{CABLE_FAMILY}_{ttype}"
                     )
                 with c2:
                     overflow_val = st.number_input(
                         "Overflow threshold",
                         min_value=0.0, value=0.0, step=0.0,
                         help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
-                        key=f"overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
+                        key=f"overflow_{CABLE_FAMILY}_{ttype}"
                     )
-                    overflow = None if overflow_val == 0 else overflow_val
+                overflow = None if overflow_val == 0 else overflow_val
 
+                figA = _hist(
+                    data=df_max["MaxMeasured"].to_numpy(),
+                    title=f"{CABLE_FAMILY.capitalize()} · {ttype} — Maximum per run",
+                    bin_size=bin_size if bin_size and bin_size > 0 else None,
+                    overflow=overflow,
+                    x_label="Max Measured (per run)",
+                )
+                st.plotly_chart(figA, width="stretch")
+            else:
+                st.info("No runs available for the max-per-run histogram.")
 
-                # Build data sources
-                df_ct_clean = _df_for(ttype, CABLE_FAMILY)
-                df_max = _max_per_run(df_ct_clean)
-
-                if not df_max.empty:
-                    figA = _hist(
-                        data=df_max["MaxMeasured"].to_numpy(),
-                        title=f"{CABLE_FAMILY.capitalize()} · {ttype} — Maximum per run",
-                        bin_size=bin_size if bin_size and bin_size > 0 else None,
-                        overflow=overflow,
-                        x_label="Max Measured (per run)",
+            # Histograms (all measurements)
+            if not df_ct_clean.empty:
+                all_vals = df_ct_clean["Measured"].to_numpy()
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    bin_size_all = st.number_input(
+                        "Bin size",
+                        min_value=0.0, value=0.0, step=0.0,
+                        help="Set to 0 for auto binning.",
+                        key=f"all_bin_{CABLE_FAMILY}_{ttype}"
                     )
-                    st.plotly_chart(figA, width="stretch")    # <-- was use_container_width=True
-                else:
-                    st.info("No runs available for the max-per-run histogram.")
-                # --- All measurements combined histogram ---
-                if not df_ct_clean.empty:
-                    all_vals = df_ct_clean["Measured"].to_numpy()
-                    c1, c2 = st.columns([1, 1])
-                    with c1:
-                        bin_size = st.number_input(
-                            "Bin size",
-                            min_value=0.0, value=0.0, step=0.0,
-                            help="Set to 0 for auto binning. Units match the 'Measured' column.",
-                            key=f"all_bin_{CABLE_FAMILY}_{ttype}"      # <-- UNIQUE KEY
-                        )
-                    with c2:
-                        overflow_val = st.number_input(
-                            "Overflow threshold",
-                            min_value=0.0, value=0.0, step=0.0,
-                            help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
-                            key=f"all_overflow_{CABLE_FAMILY}_{ttype}" # <-- UNIQUE KEY
-                        )
-                    overflow = None if overflow_val == 0 else overflow_val
-                    st.caption(f"All measurements combined: {len(all_vals):,} points")
-                    figB = _hist(
-                        data=all_vals,
-                        title=f"{CABLE_FAMILY.capitalize()} · {ttype} — All measurements (combined)",
-                        bin_size=bin_size if bin_size and bin_size > 0 else None,
-                        overflow=overflow,
-                        x_label="Measured",
+                with c2:
+                    overflow_val_all = st.number_input(
+                        "Overflow threshold",
+                        min_value=0.0, value=0.0, step=0.0,
+                        help="If > 0, values ≥ threshold are grouped into the rightmost bin.",
+                        key=f"all_overflow_{CABLE_FAMILY}_{ttype}"
                     )
-                    st.plotly_chart(figB, width="stretch")  # <-- was use_container_width=True
-                    # --- Summary statistics for all measurements (combined) ---
-                    # Safely compute stats with NaN handling
-                    vals = pd.to_numeric(pd.Series(all_vals), errors="coerce").to_numpy()
-
-                    count = int(np.sum(~np.isnan(vals)))
-                    mean = float(np.nanmean(vals)) if count > 0 else np.nan
-                    std = float(np.nanstd(vals, ddof=1)) if count > 1 else np.nan  # sample std dev
-                    vmin = float(np.nanmin(vals)) if count > 0 else np.nan
-                    vmax = float(np.nanmax(vals)) if count > 0 else np.nan
-
-                    stats_df_all = pd.DataFrame(
-                        {
-                            "Metric": ["Count", "Average", "Standard deviation", "Min", "Max"],
-                            "Value": [count, mean, std, vmin, vmax],
-                        }
-                    )
-
-                    # Optional: nice rounding for display (leave Count as int)
-                    def _fmt_val(x):
-                        if isinstance(x, (int, np.integer)):
-                            return x
-                        try:
-                            if np.isnan(x):
-                                return ""
-                            return round(float(x), 6)  # adjust precision to your needs
-                        except Exception:
-                            return x
-
-                    stats_df_all["Value"] = stats_df_all["Value"].apply(_fmt_val)
-
-                    st.caption("Summary statistics — all measurements combined")
-                    st.dataframe(
-                        stats_df_all,
-                        width="stretch",
-                        hide_index=True,
-                    )
-
-                    # Download button for the stats
-                    csv_stats_all = stats_df_all.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        label="Download combined stats (CSV)",
-                        data=csv_stats_all,
-                        file_name=f"{CABLE_FAMILY}_{ttype}_combined_stats.csv",
-                        mime="text/csv",
-                        key=f"download_{CABLE_FAMILY}_{ttype}_all_stats",
-                    )
-                else:
-                    st.info("No raw measurements available to build the combined histogram.")
-                # --- Failures ---
-                st.markdown("**Failure breakdown**")
-                failures_all = st.session_state.get("failures_by_type", {}).get(ttype, pd.DataFrame())
-
-                if failures_all.empty or "Category" not in failures_all.columns:
-                    st.info("No failure records available yet.")
-                else:
-                    fct = failures_all.copy()
-                    if "CableType" in fct.columns:
-                        fct = fct[fct["CableType"].astype(str).str.strip().str.lower() == CABLE_FAMILY.lower()]
-
-                    if fct.empty:
-                        st.info("No failures for this cable family.")
-                    else:
-                        overall = (
-                            fct.groupby("Category", dropna=False)
-                               .size()
-                               .reset_index(name="Count")
-                               .sort_values(["Count", "Category"], ascending=[False, True])
-                        )
-                        fig_overall = px.bar(
-                            overall,
-                            x="Category",
-                            y="Count",
-                            title=f"{CABLE_FAMILY.capitalize()} · {ttype} — Failures across all runs",
-                            text="Count",
-                        )
-                        fig_overall.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=60, b=10))
-                        fig_overall.update_traces(textposition="outside")
-                        st.plotly_chart(fig_overall, width="stretch")  # <-- was use_container_width=True
-
-                        # Failure table
-                        tbl = fct.copy()
-                        has_from_to = {"FromPin", "ToPin"}.issubset(tbl.columns)
-                        if has_from_to:
-                            tbl["ChannelFmt"] = tbl.apply(
-                                lambda r: f"({r['FromPin']}, {r['ToPin']})"
-                                if pd.notna(r.get("FromPin")) or pd.notna(r.get("ToPin")) else None,
-                                axis=1,
-                            )
-                        else:
-                            tbl["ChannelFmt"] = None
-
-                        if "Channel" in tbl.columns:
-                            tbl.loc[tbl["ChannelFmt"].isna(), "ChannelFmt"] = tbl["Channel"].astype(str)
-
-                        show_cols = [c for c in ["RunHeader", "ChannelFmt", "Category"] if c in tbl.columns]
-                        rename_map = {"ChannelFmt": "Channel"}
-                        sort_cols = [c for c in ["RunHeader", "ChannelFmt", "Category"] if c in tbl.columns]
-                        if sort_cols:
-                            tbl = tbl.sort_values(by=sort_cols, kind="stable")
-                        tbl_view = tbl[show_cols].rename(columns=rename_map)
-
-                        st.caption("Failure records (aggregated across all runs)")
-                        st.dataframe(tbl_view, width="stretch", hide_index=True)  # <-- was use_container_width=True
-
-                        csv_fail = tbl_view.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            label="Download failures (CSV)",
-                            data=csv_fail,
-                            file_name=f"{CABLE_FAMILY}_{ttype}_failures.csv",
-                            mime="text/csv",
-                            key=f"download_{CABLE_FAMILY}_{ttype}_fail_tbl",
-                        )
-
+                overflow_all = None if overflow_val_all == 0 else overflow_val_all
+                st.caption(f"All measurements combined: {len(all_vals):,} points")
+                figB = _hist(
+                    data=all_vals,
+                    title=f"{CABLE_FAMILY.capitalize()} · {ttype} — All measurements (combined)",
+                    bin_size=bin_size_all if bin_size_all and bin_size_all > 0 else None,
+                    overflow=overflow_all,
+                    x_label="Measured",
+                )
+                st.plotly_chart(figB, width="stretch")
+            else:
+                st.info("No raw measurements available to build the combined histogram.")
+            # Failure breakdown (unchanged)
+            _render_failures_block(ttype, CABLE_FAMILY)
 
 render_single_family()

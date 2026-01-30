@@ -1168,203 +1168,165 @@ st.dataframe(skew_overall_df, use_container_width=True)
 
 
 # =================================================================
-st.subheader("Zo Histograms")
+# =================== Zo Histograms (P1 + P2 Combined) ===================
+st.subheader("Zo Histograms (P1 + P2 Combined)")
 
 categories = [
     ("paddleboard", "Paddleboard"),
     ("cable",       "Cable"),
     ("dib",         "DIB"),
 ]
-ends = ["P1", "P2"]  # will quietly show "No data" when an end isn’t present
-
-
+ends = ["P1", "P2"]
 
 tabs = st.tabs([label for _, label in categories])
+
 for (cat_key, cat_label), tab in zip(categories, tabs):
     with tab:
         st.write(f"**Category:** {cat_label}")
-        cols = st.columns(2)
-        for i, end in enumerate(ends):
-            with cols[i]:
-                st.markdown(f"##### End: {end}")
-                
-                # --- Max ---
-                df_max = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="max", end=end)
-                #switch this to be the maximum from each cable not all the maximums 
 
-                df_max_per_cable = collect_zo_max_values_df(
-                    st.session_state["cables"],
-                    category=cat_key,
-                    metric="max",
-                    end=end,
-                    # If you have a known unique attribute, uncomment and set it explicitly:
-                    # key_fn=lambda c: c.serial
+        # ---- Build per-cable arrays for BOTH ends (Max) ----
+        df_max_p1 = collect_zo_max_values_df(
+            st.session_state["cables"], category=cat_key, metric="max", end="P1"
+        )
+        df_max_p1["end"] = "P1"
+
+        df_max_p2 = collect_zo_max_values_df(
+            st.session_state["cables"], category=cat_key, metric="max", end="P2"
+        )
+        df_max_p2["end"] = "P2"
+
+        df_max_both = pd.concat([df_max_p1, df_max_p2], ignore_index=True)
+        df_max_both.rename(columns={"value": "max_value_ohm"}, inplace=True)
+
+        # ---- Build per-cable arrays for BOTH ends (Min) ----
+        df_min_p1 = collect_zo_min_values_df(
+            st.session_state["cables"], category=cat_key, metric="min", end="P1"
+        )
+        df_min_p1["end"] = "P1"
+
+        df_min_p2 = collect_zo_min_values_df(
+            st.session_state["cables"], category=cat_key, metric="min", end="P2"
+        )
+        df_min_p2["end"] = "P2"
+
+        df_min_both = pd.concat([df_min_p1, df_min_p2], ignore_index=True)
+        df_min_both.rename(columns={"value": "min_value_ohm"}, inplace=True)
+
+        cmax, cmin = st.columns(2)
+
+        with cmax:
+            st.markdown(f"##### {cat_label} — Max Impedance (Ω)")
+            if df_max_both.empty or df_max_both["max_value_ohm"].dropna().empty:
+                st.info("No Max data across P1/P2")
+            else:
+                fig = px.histogram(
+                    df_max_both,
+                    x="max_value_ohm",
+                    color="end",
+                    nbins=30,
+                    barmode="overlay",
+                    opacity=0.60,
+                    title=f"{cat_label} — Max Impedance (P1 + P2)",
                 )
-
-                _histogram(df_max_per_cable, title=f"{cat_label} — {end} — Max Impedance", x_label="Max Impedance")
-
-                # New: collect with serial for cable-level counts
-                df_max_s = _collect_zo_values_with_serial(
-                    st.session_state["cables"], category=cat_key, metric="max", end=end
+                fig.update_layout(
+                    xaxis_title="Max Impedance (Ω)",
+                    yaxis_title="Count",
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    template="plotly_white",
+                    legend_title_text="End",
                 )
+                # Start at 0 for clarity
+                fig.update_xaxes(range=[0, None])
+                st.plotly_chart(fig, use_container_width=True)
 
-                if df_max_s is None or df_max_s.empty:
-                    st.info("No Max data")
-                else:
-                    zo_tol_prop_ohm = st.number_input(
-                        "Proposed tolerance [Ω]",
-                        key=f"zo_tol_prop_{cat_key}_{end}_max",
-                        min_value=0.0,
-                        max_value=50.0,
-                        value=float(st.session_state["zo_tol_proposed_ohm"]),
-                        step=0.5,
-                    )
-
-                    # Choose rule: "all_channels" (default) or "any_channel"
-                    # You can also expose this via a widget if you want
-                    counts = _zo_counts_by_cable(
-                        df_max_s,
-                        target=zo_target_ohm,
-                        tol_curr=zo_tol_curr_ohm,
-                        tol_prop=zo_tol_prop_ohm,
-                        value_col="value",
-                        serial_col="serial",
-                        per_cable_rule="all_channels",
-                    )
-
-                    c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
-                    c1.metric("Cables — Total", counts["total"])
-                    c2.metric("Cables — Pass (Current)", counts["pass_current"])
-                    c3.metric("Cables — Fail (Current)", counts["fail_current"])
-                    c4.metric("Cables — Pass (Proposed)", counts["pass_prop"])
-                    c5.metric("Cables — Fail (Proposed)", counts["fail_prop"])
-                    st.caption(f"Spec — Current: Target {zo_target_ohm} Ω ±{zo_tol_curr_ohm} Ω | Proposed: ±{zo_tol_prop_ohm} Ω")
-
-                # --- Min ---
-                df_min = _collect_zo_values(st.session_state["cables"], category=cat_key, metric="min", end=end)
-                df_min_per_cable = collect_zo_min_values_df(
-                    st.session_state["cables"],
-                    category=cat_key,
-                    metric="min",
-                    end=end,
-                    # If you have a known unique attribute, uncomment and set it explicitly:
-                    # key_fn=lambda c: c.serial
+        with cmin:
+            st.markdown(f"##### {cat_label} — Min Impedance (Ω)")
+            if df_min_both.empty or df_min_both["min_value_ohm"].dropna().empty:
+                st.info("No Min data across P1/P2")
+            else:
+                fig = px.histogram(
+                    df_min_both,
+                    x="min_value_ohm",
+                    color="end",
+                    nbins=30,
+                    barmode="overlay",
+                    opacity=0.60,
+                    title=f"{cat_label} — Min Impedance (P1 + P2)",
                 )
-
-                _histogram(df_min_per_cable, title=f"{cat_label} — {end} — Min Impedance", x_label="Min Impedance")
-
-
-                # New: collect with serial for cable-level counts
-                df_min_s = _collect_zo_values_with_serial(
-                    st.session_state["cables"], category=cat_key, metric="min", end=end
+                fig.update_layout(
+                    xaxis_title="Min Impedance (Ω)",
+                    yaxis_title="Count",
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    template="plotly_white",
+                    legend_title_text="End",
                 )
-
-                if df_min_s is None or df_min_s.empty:
-                    st.info("No Min data")
-                else:
-                    zo_tol_prop_ohm = st.number_input(
-                        "Proposed tolerance [Ω]",
-                        key=f"zo_tol_prop_{cat_key}_{end}_min",
-                        min_value=0.0,
-                        max_value=50.0,
-                        value=float(st.session_state["zo_tol_proposed_ohm"]),
-                        step=0.5,
-                    )
-
-                    counts = _zo_counts_by_cable(
-                        df_min_s,
-                        target=zo_target_ohm,
-                        tol_curr=zo_tol_curr_ohm,
-                        tol_prop=zo_tol_prop_ohm,
-                        value_col="value",
-                        serial_col="serial",
-                        per_cable_rule="all_channels",
-                    )
-
-                    c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
-                    c1.metric("Cables — Total", counts["total"])
-                    c2.metric("Cables — Pass (Current)", counts["pass_current"])
-                    c3.metric("Cables — Fail (Current)", counts["fail_current"])
-                    c4.metric("Cables — Pass (Proposed)", counts["pass_prop"])
-                    c5.metric("Cables — Fail (Proposed)", counts["fail_prop"])
-                    st.caption(f"Spec — Current: Target {zo_target_ohm} Ω ±{zo_tol_curr_ohm} Ω | Proposed: ±{zo_tol_prop_ohm} Ω")
-
-# Global summary across all slices
-
+                fig.update_xaxes(range=[0, None])
+                st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
+# =================== Skew Histograms (Δ skew [pS], P1 + P2 Combined) ===================
+st.subheader("Skew Histograms (Δ skew [pS], P1 + P2 Combined)")
 
+df_delta_p1 = _collect_skew_delta(st.session_state["cables"], end="P1").rename(columns={"value_ps": "delta_ps"})
+df_delta_p1["end"] = "P1"
+df_delta_p2 = _collect_skew_delta(st.session_state["cables"], end="P2").rename(columns={"value_ps": "delta_ps"})
+df_delta_p2["end"] = "P2"
 
-st.subheader("Skew Histograms (Δ skew [pS])")
+df_delta_both = pd.concat([df_delta_p1, df_delta_p2], ignore_index=True)
 
-ends = ["P1", "P2"]
-cols = st.columns(2)
+if df_delta_both.empty or df_delta_both["delta_ps"].dropna().empty:
+    st.info("No Δ skew data across P1/P2")
+else:
+    fig = px.histogram(
+        df_delta_both,
+        x="delta_ps",
+        color="end",
+        nbins=30,
+        barmode="overlay",
+        opacity=0.6,
+        title="Δ Skew (pS) — P1 + P2",
+    )
+    fig.update_layout(
+        xaxis_title="Δ skew [pS]",
+        yaxis_title="Count",
+        margin=dict(l=10, r=10, t=40, b=10),
+        template="plotly_white",
+        legend_title_text="End",
+    )
+    fig.update_xaxes(range=[0, None])
+    st.plotly_chart(fig, use_container_width=True)
 
-for i, end in enumerate(ends):
-    with cols[i]:
-        df_delta = _collect_skew_delta(st.session_state["cables"], end=end)  # for histogram (channels)
-        df_delta_s = _collect_skew_delta_with_serial(st.session_state["cables"], end=end)
-        if df_delta.empty:
-            st.info(f"No data for Skew — {end} — Δ (pS)")
-        else:
-            # Histogram (channels)
-            fig = px.histogram(df_delta, x="value_ps", nbins=30, title=f"Maximum Skew — {end} — Δ (pS)")
-            fig.update_layout(
-                bargap=0.05,
-                xaxis_title="Δ skew [pS]",
-                yaxis_title="Count",
-                margin=dict(l=10, r=10, t=40, b=10),
-                template="plotly_white",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            proposed_skew_ps = st.number_input(
-                "Proposed tolerance [pS]",
-                key=f"skew_tol_prop_{cat_key}_{end}_ps",
-                min_value=0.0,
-                max_value=50.0,
-                value=float(st.session_state["skew_tol_proposed"]),
-                step=0.5,
-                )
+    # Proposed tolerance control (fixed Streamlit key)
+    proposed_skew_ps = st.number_input(
+        "Proposed tolerance [pS]",
+        key="skew_tol_prop_combined_ps",
+        min_value=0.0,
+        max_value=100000.0,
+        value=float(st.session_state.get("skew_tol_proposed", 23)),
+        step=1.0,
+    )
 
-            # Specs
-            current_spec_ps = st.session_state["skew_current_spec_ps"]
-            proposed_spec_ps = proposed_skew_ps
+    # Cable-level counts across both ends
+    df_delta_s_p1 = _collect_skew_delta_with_serial(st.session_state["cables"], end="P1")
+    df_delta_s_p2 = _collect_skew_delta_with_serial(st.session_state["cables"], end="P2")
+    df_delta_s = pd.concat([df_delta_s_p1, df_delta_s_p2], ignore_index=True)
 
-            # ----- Cable-level counts -----
-            if df_delta_s is None or df_delta_s.empty:
-                st.info("No cable-level skew data available.")
-            else:
-                # Choose rule: "all_channels" (default) or "any_channel"
-                cable_rule = "all_channels"
-
-                c_counts = _skew_counts_by_cable(
-                    df_delta_s,
-                    curr_ps=current_spec_ps,
-                    prop_ps=proposed_spec_ps,
-                    value_col="value_ps",
-                    serial_col="serial",
-                    per_cable_rule=cable_rule,
-                )
-
-                mcol1, mcol2, mcol3, mcol4 = st.columns([1,1,1,1])
-                mcol1.metric(label=f"{end} Δ skew — Cables Total", value=c_counts["total"])
-                mcol2.metric(label=f"{end} Δ skew — Cables Pass (Current ±{current_spec_ps} pS)", value=c_counts["pass_current"])
-                mcol3.metric(label=f"{end} Δ skew — Cables Fail (Current)", value=c_counts["fail_current"])
-                mcol4.metric(label=f"{end} Δ skew — Cables Fail (Proposed ±{proposed_spec_ps} pS)", value=c_counts["fail_prop"])
-
-                st.caption(f"Cable rule: {'All channels must pass' if cable_rule=='all_channels' else 'Any channel may pass'}")
-                st.dataframe(
-                    {
-                        "Spec": ["Current", "Proposed"],
-                        "Cable Pass": [c_counts["pass_current"], c_counts["pass_prop"]],
-                        "Cable Fail": [c_counts["fail_current"], c_counts["fail_prop"]],
-                        "Cables Total": [c_counts["total"], c_counts["total"]],
-                    },
-                    use_container_width=True
-                )
-
-
-      
+    if df_delta_s is None or df_delta_s.empty:
+        st.info("No cable-level skew data available.")
+    else:
+        c_counts = _skew_counts_by_cable(
+            df_delta_s,
+            curr_ps=float(st.session_state.get("skew_current_spec_ps", 50.0)),
+            prop_ps=float(proposed_skew_ps),
+            value_col="value_ps",
+            serial_col="serial",
+            per_cable_rule="all_channels",
+        )
+        mcol1, mcol2, mcol3, mcol4 = st.columns([1,1,1,1])
+        mcol1.metric("Cables — Total", c_counts["total"])
+        mcol2.metric("Pass (Current)", c_counts["pass_current"])
+        mcol3.metric("Fail (Current)", c_counts["fail_current"])
+        mcol4.metric("Fail (Proposed)", c_counts["fail_prop"])
 st.divider()
 st.subheader("Download CSVs")
 

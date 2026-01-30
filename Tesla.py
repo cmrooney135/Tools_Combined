@@ -263,7 +263,6 @@ class Tesla(Cable):
         p1_order = self.p1_order
         p2_order = self.p2_order
         dib_order = self.dib_order
-
         # ---- choose numeric column ----
         if value_col is None:
             if "Measured_R (mOhm)" in df.columns:
