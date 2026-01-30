@@ -1257,7 +1257,6 @@ def pick_xy_columns(df: pd.DataFrame):
 
     return x_col, y_col
 
-# --- NEW: palette for unique per-trace colors ---
 from itertools import cycle
 unique_palette = (
     px.colors.qualitative.Plotly
@@ -1310,34 +1309,30 @@ for cable in st.session_state.get("cables", []):
         use_gl = len(x_vals) > 5000
         trace_cls = go.Scattergl if use_gl else go.Scatter
 
-        # --- NEW: unique color per trace ---
         color_this_trace = next(per_cable_cycle)
 
         fig.add_trace(
             trace_cls(
                 x=x_vals, y=y_vals, mode="lines",
                 name=f"{end} — {name}",
-                # keep legend grouping optional; unique color already distinguishes traces
-                # legendgroup=f"{end}",
                 line=dict(width=1.4, color=color_this_trace),
                 hovertemplate=f"<b>{end} — {name}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>",
             )
         )
 
-    # --- NEW: legend on the right, vertical, with extra right margin ---
     fig.update_layout(
         title=f"Overlay — Cable {sn} — P1 & P2",
         template="plotly_white",
         legend=dict(
             orientation="v",
             yanchor="top",  y=1.0,
-            xanchor="left", x=1.02,   # place legend to the right of plotting area
+            xanchor="left", x=1.02,   
             traceorder="normal",
             bgcolor="rgba(255,255,255,0.6)",
             bordercolor="rgba(0,0,0,0.2)",
             borderwidth=1,
         ),
-        margin=dict(l=10, r=180, t=48, b=10),  # extra right margin for legend
+        margin=dict(l=10, r=180, t=48, b=10),  
         hovermode="x unified",
     )
     fig.update_xaxes(title_text="Time [s]")

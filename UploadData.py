@@ -265,6 +265,8 @@ def process_csv(
                         cable = create_cable(serial_norm)
                 except ValueError as e:
                     return None, None
+                if(cable == None):
+                    return None, None
 
                 cables.append(cable)
 
