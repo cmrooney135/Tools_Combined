@@ -159,53 +159,6 @@ def _classify_failure(detail: str) -> str:
     return "Other"
 from typing import Tuple
 
-def split_by_expected_groups(
-    df_long: pd.DataFrame,
-    *,
-    expected_col: str = "Expected",
-    low_target: float = 140.0,
-    high_target: float = 500.0,
-    method: str = "nearest",          # "exact" | "nearest" | "threshold"
-    threshold: float | None = None,   # default midpoint if None (for "threshold")
-    prefer_high_on_tie: bool = True,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Split long-form resistance data by Expected value into (df_high, df_low).
-
-    - exact:     uses Expected == 140/500 only.
-    - nearest:   assigns by whichever target 140/500 is closer to (robust to 139.9 / 499.8, etc).
-    - threshold: uses a single cutoff, default midpoint (320).
-    """
-    if df_long.empty or expected_col not in df_long.columns:
-        return pd.DataFrame(), pd.DataFrame()
-
-    exp = pd.to_numeric(df_long[expected_col], errors="coerce")
-    valid = df_long[exp.notna()].copy()
-    if valid.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    if method == "exact":
-        df_low  = valid[exp == low_target].copy()
-        df_high = valid[exp == high_target].copy()
-        return df_high, df_low
-
-    if method == "threshold":
-        thr = threshold if threshold is not None else (low_target + high_target) / 2.0
-        df_high = valid[exp >= thr].copy()
-        df_low  = valid[exp <  thr].copy()
-        return df_high, df_low
-
-    # default: nearest
-    d_low  = (exp - low_target).abs()
-    d_high = (exp - high_target).abs()
-    if prefer_high_on_tie:
-        high_mask = d_high <= d_low
-    else:
-        high_mask = d_high < d_low
-
-    df_high = valid[high_mask].copy()
-    df_low  = valid[~high_mask].copy()
-    return df_high, df_low
 
 def normalize_minimal(cable_obj, test_obj, source_name: str | None = None) -> pd.DataFrame:
     if not hasattr(test_obj, "data") or not isinstance(test_obj.data, pd.DataFrame):
