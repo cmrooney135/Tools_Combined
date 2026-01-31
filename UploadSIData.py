@@ -322,7 +322,7 @@ def parse_sample_id_value(sample_id_raw: str) -> Tuple[str, str]:
                     break
 
     if not serial:
-        raise ValueError(f"Could not extract serial from Sample ID: '{sample_id_raw}'")
+        return None, None
 
     return serial.upper(), pos.upper()
 from typing import Tuple
@@ -376,6 +376,9 @@ def read_header(src) -> Tuple[Dict[str, Optional[str]], int]:
 
         candidate = sample_id_val if sample_id_val else fl_norm
         sn, pos = parse_sample_id_value(candidate)
+        if(sn is None):
+            return None, None
+        print(sn, pos)
         header = {
             "test_date": None,
             "test_time": None,
@@ -491,6 +494,8 @@ def process_SI_file(uploaded_file, cables):
 
     # 2) Parse header
     header, data_start = read_header(uploaded_file)
+    if(header is None):
+        return None, None
     serial_norm = header["cable_sn"].strip().upper()
     end = (header.get("position_tag") or "").strip().upper()  # "P1"/"P2"
     # 3) Find/create cable

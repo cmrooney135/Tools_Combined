@@ -1,11 +1,14 @@
-import streamlit as st
-import pandas as pd
+# -*- coding: utf-8 -*-
+import re
+from itertools import cycle
+from typing import Optional, Dict, Callable
+from contextlib import nullcontext
+
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import re
-from typing import Optional, Dict, Callable
-from dataclasses import Field as DataclassField
+import streamlit as st
 
 from cable_factory import create_cable
 from SI_Test import SI_Test
@@ -14,7 +17,9 @@ from Cable import Cable
 from _shared_ui import top_bar
 from UploadSIData import process_SI_file
 
-# ----------------------- Page & Session Init -----------------------
+# ============================================================
+#                     Page & Session Init
+# ============================================================
 st.set_page_config(page_title="SI Tools", page_icon="🐍", layout="wide")
 
 def ensure_state():
@@ -38,7 +43,7 @@ def ensure_state():
 def migrate_si_tests_traces():
     """
     Normalize all SI_Test.traces to a dict for existing objects in session_state.
-    Must be safe to run multiple times.
+    Safe to run multiple times.
     """
     cables = st.session_state.get("cables", [])
     for c in cables:
@@ -55,20 +60,18 @@ ensure_state()
 migrate_si_tests_traces()
 top_bar(page_icon="🐍", title="🏝️SI Tools", home_page_path="Home.py")
 
-# ------------------------- Utilities -------------------------
+
+# ============================================================
+#                        Utilities
+# ============================================================
 def _ns_to_ps_series(s: pd.Series) -> pd.Series:
     """Convert a numeric pandas Series from nanoseconds to picoseconds."""
     return pd.to_numeric(s, errors="coerce") * 1000.0
 
-def _ns_to_ps_value(x: float | int | None):
-    if x is None:
-        return None
-    return float(x) * 1000.0
-
 def parse_trace_filename(name: str) -> Optional[Dict[str, str]]:
     """
     Parse 'SN-01ACA3A061_J2.A01_P1_M1(.csv)' → {'serial': '01ACA3A061', 'end': 'P1', 'channel': 'A01'}
-    Channel is optional to use; serial and end are required for auto-attach.
+    Channel is optional; serial and end required for auto-attach.
     """
     base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     base_no_ext = re.sub(r"\.[A-Za-z0-9]+$", "", base)
@@ -148,7 +151,14 @@ def _dedup_label(label: str, existing: set[str]) -> str:
         k += 1
     return f"{label}_{k}"
 
-# ---------------------- Zo Data Builders ----------------------
+def _current_zo_tol_for_category(cat_key: str) -> float:
+    """Return the current Zo tolerance (Ω) for a given category."""
+    return 2.5 if str(cat_key).strip().lower() == "cable" else 5.0
+
+
+# ============================================================
+#                   Zo Data Builders / Matrices
+# ============================================================
 def build_zo_wide_matrix(cables, *, category: str, metric: str, end: str) -> pd.DataFrame:
     """
     Build a wide matrix for a given Zo category and metric:
@@ -186,11 +196,14 @@ def build_zo_wide_matrix(cables, *, category: str, metric: str, end: str) -> pd.
     wide.reset_index(drop=True, inplace=True)
     return wide
 
-# ---------------------- Skew Overall (Pair Cols) ----------------------
+
+# ============================================================
+#                  Skew (Overall from Pair Cols)
+# ============================================================
 def _find_two_numeric_pre_skew_cols(df: pd.DataFrame) -> tuple[str | None, str | None]:
     """
     Find two numeric columns immediately left of a 'skew' column if present.
-    Fallback: first two numeric columns (ignoring col0 label).
+    Fallback: first two numeric columns (ignoring first col if label-like).
     """
     cols = list(df.columns)
 
@@ -291,13 +304,12 @@ def build_skew_overall_from_paircols_wide(cables, end: str) -> pd.DataFrame:
     wide.reset_index(drop=True, inplace=True)
     return wide
 
-# ---------------------- Per-Cable Zo (Max/Min) ----------------------
+
+# ============================================================
+#                   Per-Cable Zo (Max/Min)
+# ============================================================
 def collect_zo_min_values_df(
-    cables,
-    category: str,
-    metric: str,
-    end: str,
-    key_fn=None,
+    cables, category: str, metric: str, end: str, key_fn=None,
 ) -> pd.DataFrame:
     def default_key_fn(cable):
         for attr in ("serial", "name", "id"):
@@ -335,11 +347,7 @@ def collect_zo_min_values_df(
     return pd.DataFrame({"value": values})
 
 def collect_zo_max_values_df(
-    cables,
-    category: str,
-    metric: str,
-    end: str,
-    key_fn=None,
+    cables, category: str, metric: str, end: str, key_fn=None,
 ) -> pd.DataFrame:
     def default_key_fn(cable):
         for attr in ("serial", "name", "id"):
@@ -376,7 +384,10 @@ def collect_zo_max_values_df(
     values = [per_cable_max[k] for k in order]
     return pd.DataFrame({"value": values})
 
-# ---------------------- Zo Collect (with serials) ----------------------
+
+# ============================================================
+#              Zo Collect (serial-aware long form)
+# ============================================================
 def _collect_zo_values_with_serial(cables, category: str, metric: str, end: str) -> pd.DataFrame:
     rows = []
     for cable, test in _iter_si_tests(cables):
@@ -393,7 +404,10 @@ def _collect_zo_values_with_serial(cables, category: str, metric: str, end: str)
                 rows.extend({"serial": sn, "value": float(v)} for v in col.tolist())
     return pd.DataFrame(rows, columns=["serial", "value"])
 
-# ---------------------- Skew (Category-Aware) ----------------------
+
+# ============================================================
+#                     Skew (Category-Aware)
+# ============================================================
 def _collect_skew_delta(
     cables,
     end: str,
@@ -574,7 +588,10 @@ def _collect_skew_delta_with_serial(
 
     return pd.DataFrame(rows, columns=["serial", "value_ps"])
 
-# ---------------------- Counts & Reductions ----------------------
+
+# ============================================================
+#               Counts & Small Reductions (fast)
+# ============================================================
 def _zo_counts_by_cable(
     df: pd.DataFrame,
     target: float,
@@ -675,7 +692,10 @@ def _reduce_and(series_list: list[pd.Series]) -> pd.Series:
         return pd.Series(dtype=bool)
     return pd.concat(series_list, axis=1).all(axis=1)
 
-# ---------------------- Uploaders ----------------------
+
+# ============================================================
+#                  Uploaders (DAT & Traces)
+# ============================================================
 uploaded_files = st.file_uploader("Upload your SI files", type="DAT", accept_multiple_files=True)
 uploaded_trace_csvs = st.file_uploader("Upload your Trace CSV files", type=["csv"], accept_multiple_files=True, key="trace_uploader")
 
@@ -695,7 +715,10 @@ if uploaded_files:
             processed.append(uf.name)
         st.session_state["processed_files"] = list(processed)
 
-# ---------------------- Specs Defaults ----------------------
+
+# ============================================================
+#                        Specs Defaults
+# ============================================================
 if "zo_target_ohm" not in st.session_state:
     st.session_state["zo_target_ohm"] = 50.0
 if "zo_tol_current_ohm" not in st.session_state:
@@ -716,8 +739,7 @@ if "skew_current_spec_ps" not in st.session_state:
     st.session_state["skew_current_spec_ps"] = 23.0
 if "skew_tol_proposed" not in st.session_state:
     st.session_state["skew_tol_proposed"] = 23.0
-st.session_state.setdefault("zo_tol_proposed_max_ohm", float(st.session_state.get("zo_tol_current_ohm", 5.0)))
-st.session_state.setdefault("zo_tol_proposed_min_ohm", float(st.session_state.get("zo_tol_current_ohm", 5.0)))
+
 st.session_state.setdefault("skew_proposed_ps", float(st.session_state.get("skew_current_spec_ps", 50.0)))
 
 zo_target_ohm   = float(st.session_state.get("zo_target_ohm", 50.0))
@@ -725,6 +747,71 @@ zo_tol_curr_ohm = float(st.session_state.get("zo_tol_current_ohm", 5.0))
 curr_skew_ps    = float(st.session_state.get("skew_current_spec_ps", 50.0))
 
 
+# ============================================================
+#                 Performance / Caching Helpers
+# ============================================================
+def _data_cache_key():
+    pf = tuple(sorted(st.session_state.get("processed_files", [])))
+    pt = tuple(sorted(st.session_state.get("processed_trace_files", [])))
+    num_cables = len(st.session_state.get("cables", []))
+    num_tests = sum(len(getattr(c, "TESTS", {}).get("si", []) or []) 
+                    for c in st.session_state.get("cables", []))
+    return (pf, pt, num_cables, num_tests)
+
+from contextlib import contextmanager
+@contextmanager
+def fragment_ctx():
+    """
+    A guaranteed context manager that isolates rendering.
+    Uses st.container() (a context manager) under the hood.
+    This avoids relying on st.fragment behaviors across versions.
+    """
+    with st.container():
+        yield
+
+
+# Cached wrappers (they reference st.session_state["cables"] inside)
+@st.cache_data(show_spinner=False)
+def collect_zo_max_values_df_cached(cache_key, category, metric, end):
+    return collect_zo_max_values_df(st.session_state["cables"], category, metric, end)
+
+@st.cache_data(show_spinner=False)
+def collect_zo_min_values_df_cached(cache_key, category, metric, end):
+    return collect_zo_min_values_df(st.session_state["cables"], category, metric, end)
+
+@st.cache_data(show_spinner=False)
+def collect_zo_values_with_serial_cached(cache_key, category, metric, end):
+    return _collect_zo_values_with_serial(st.session_state["cables"], category, metric, end)
+
+@st.cache_data(show_spinner=False)
+def collect_skew_delta_cached(cache_key, end, category):
+    return _collect_skew_delta(st.session_state["cables"], end=end, category=category)
+
+@st.cache_data(show_spinner=False)
+def collect_skew_delta_with_serial_cached(cache_key, end, category):
+    return _collect_skew_delta_with_serial(st.session_state["cables"], end=end, category=category)
+
+@st.cache_data(show_spinner=False)
+def build_zo_wide_matrix_cached(cache_key, category, metric, end):
+    return build_zo_wide_matrix(st.session_state["cables"], category=category, metric=metric, end=end)
+
+@st.cache_data(show_spinner=False)
+def build_skew_wide_matrix_cached(cache_key, end):
+    return build_skew_wide_matrix(st.session_state["cables"], end=end)
+
+@st.cache_data(show_spinner=False)
+def collect_skew_overall_from_paircols_per_test_cached(cache_key, end):
+    return _collect_skew_overall_from_paircols_per_test(st.session_state["cables"], end=end)
+
+@st.cache_data(show_spinner=False)
+def build_skew_overall_from_paircols_wide_cached(cache_key, end):
+    return build_skew_overall_from_paircols_wide(st.session_state["cables"], end=end)
+
+
+# ============================================================
+#                         Main Tabs
+# ============================================================
+st.divider()
 
 categories = [
     ("paddleboard", "Paddleboard"),
@@ -733,239 +820,29 @@ categories = [
 ]
 ends = ["P1", "P2"]
 
-st.divider()
-
-# -------- Category-aware Executive Summaries (per tab) --------
-def _zo_exec_summary_for_category(cat_key: str) -> pd.DataFrame:
-    """
-    Category-aware Zo summary (AND across ends) for the current category tab.
-    Returns a DataFrame with two rows: Zo Max, Zo Min.
-    """
-    pass_curr_list_max, pass_prop_list_max = [], []
-    pass_curr_list_min, pass_prop_list_min = [], []
-
-    target_ohm = float(st.session_state.get("zo_target_ohm", 50.0))
-    tol_curr   = float(st.session_state.get("zo_tol_current_ohm", 5.0))
-    tol_prop_max = float(st.session_state.get("zo_tol_proposed_max_ohm", tol_curr))
-    tol_prop_min = float(st.session_state.get("zo_tol_proposed_min_ohm", tol_curr))
-
-    # P1 & P2
-    for end in ("P1", "P2"):
-        # ---- MAX ----
-        df_max_s = _collect_zo_values_with_serial(
-            st.session_state["cables"], category=cat_key, metric="max", end=end
-        )
-        if df_max_s is not None and not df_max_s.empty:
-            vals = pd.to_numeric(df_max_s["value"], errors="coerce")
-            ser  = df_max_s["serial"]
-            m    = vals.notna() & ser.notna()
-            vals, ser = vals[m], ser[m]
-            dev = (vals - target_ohm).abs()
-            ok_curr = (dev <= tol_curr).groupby(ser).all()
-            ok_prop = (dev <= tol_prop_max).groupby(ser).all()
-            pass_curr_list_max.append(ok_curr)
-            pass_prop_list_max.append(ok_prop)
-
-        # ---- MIN ----
-        df_min_s = _collect_zo_values_with_serial(
-            st.session_state["cables"], category=cat_key, metric="min", end=end
-        )
-        if df_min_s is not None and not df_min_s.empty:
-            vals = pd.to_numeric(df_min_s["value"], errors="coerce")
-            ser  = df_min_s["serial"]
-            m    = vals.notna() & ser.notna()
-            vals, ser = vals[m], ser[m]
-            dev = (vals - target_ohm).abs()
-            ok_curr = (dev <= tol_curr).groupby(ser).all()
-            ok_prop = (dev <= tol_prop_min).groupby(ser).all()
-            pass_curr_list_min.append(ok_curr)
-            pass_prop_list_min.append(ok_prop)
-
-    # AND across ends for the current category
-    max_curr_all = _reduce_and(pass_curr_list_max)
-    max_prop_all = _reduce_and(pass_prop_list_max)
-    min_curr_all = _reduce_and(pass_curr_list_min)
-    min_prop_all = _reduce_and(pass_prop_list_min)
-
-    def _counts(sr: pd.Series):
-        total = int(sr.size)
-        passed = int(sr.sum())
-        return total, passed, total - passed
-
-    total_max, pass_max_curr, fail_max_curr = _counts(max_curr_all)
-    _,        pass_max_prop, fail_max_prop  = _counts(max_prop_all)
-    total_min, pass_min_curr, fail_min_curr = _counts(min_curr_all)
-    _,        pass_min_prop, fail_min_prop  = _counts(min_prop_all)
-
-    return pd.DataFrame([
-        {
-            "Metric": "Zo Max",
-            "Current Spec":  f"Target {target_ohm} Ω, ±{tol_curr} Ω",
-            "Proposed Spec": f"Target {target_ohm} Ω, ±{tol_prop_max} Ω",
-            "Cables — Pass (Current)": pass_max_curr,
-            "Cables — Fail (Current)": fail_max_curr,
-            "Cables — Pass (Proposed)": pass_max_prop,
-            "Cables — Fail (Proposed)": fail_max_prop,
-            "Cables — Total": total_max,
-        },
-        {
-            "Metric": "Zo Min",
-            "Current Spec":  f"Target {target_ohm} Ω, ±{tol_curr} Ω",
-            "Proposed Spec": f"Target {target_ohm} Ω, ±{tol_prop_min} Ω",
-            "Cables — Pass (Current)": pass_min_curr,
-            "Cables — Fail (Current)": fail_min_curr,
-            "Cables — Pass (Proposed)": pass_min_prop,
-            "Cables — Fail (Proposed)": fail_min_prop,
-            "Cables — Total": total_min,
-        },
-    ])
-
-
-def _skew_exec_summary_for_category(cat_key: str) -> pd.DataFrame:
-    """
-    Category-aware skew summary (AND across ends) for the current category tab.
-    Returns a single-row DataFrame for Δ Skew.
-    """
-    curr_ps = float(st.session_state.get("skew_current_spec_ps", 50.0))
-    prop_ps = float(st.session_state.get("skew_proposed_ps", curr_ps))
-
-    per_end_curr, per_end_prop = [], []
-
-    for end in ("P1", "P2"):
-        df_s = _collect_skew_delta_with_serial(
-            st.session_state["cables"], end=end, category=cat_key
-        )
-        if df_s is None or df_s.empty:
-            continue
-
-        vals = pd.to_numeric(df_s["value_ps"], errors="coerce").abs()
-        ser  = df_s["serial"]
-        m    = vals.notna() & ser.notna()
-        vals, ser = vals[m], ser[m]
-
-        ok_curr = (vals <= curr_ps).groupby(ser).all()
-        ok_prop = (vals <= prop_ps).groupby(ser).all()
-        per_end_curr.append(ok_curr)
-        per_end_prop.append(ok_prop)
-
-    curr_all = _reduce_and(per_end_curr)
-    prop_all = _reduce_and(per_end_prop)
-
-    total     = int(curr_all.size)
-    pass_curr = int(curr_all.sum())
-    fail_curr = total - pass_curr
-    pass_prop = int(prop_all.sum())
-    fail_prop = total - pass_prop
-
-    return pd.DataFrame([{
-        "Metric": "Δ Skew",
-        "Current Spec":  f"±{curr_ps} pS",
-        "Proposed Spec": f"±{prop_ps} pS",
-        "Cables — Pass (Current)": pass_curr,
-        "Cables — Fail (Current)": fail_curr,
-        "Cables — Pass (Proposed)": pass_prop,
-        "Cables — Fail (Proposed)": fail_prop,
-        "Cables — Total": total,
-    }])
-
-# ---------------------- Zo Histograms (Combined P1+P2) ----------------------
-
 tabs = st.tabs([label for _, label in categories])
 for (cat_key, cat_label), tab in zip(categories, tabs):
     with tab:
-
         st.write(f"**Category:** {cat_label}")
-        # ---------- Category-aware Executive Summary (inside tab) ----------
-        st.markdown("### Executive Summary")
-        zo_prop_df = pd.DataFrame([
-    {
-        "Metric": "Zo Max",
-        "Target (Ω)": zo_target_ohm,
-        "Current Tol (Ω)": zo_tol_curr_ohm,
-        "Proposed Tol (Ω)": float(st.session_state["zo_tol_proposed_max_ohm"]),
-    },
-    {
-        "Metric": "Zo Min",
-        "Target (Ω)": zo_target_ohm,
-        "Current Tol (Ω)": zo_tol_curr_ohm,
-        "Proposed Tol (Ω)": float(st.session_state["zo_tol_proposed_min_ohm"]),
-    },
-])
-        zo_prop_edited = st.data_editor(
-            zo_prop_df,
-            key=f"zo_prop_editor_{cat_key}",
-            num_rows="fixed",
-            hide_index=True,
-            column_config={
-                "Metric": st.column_config.TextColumn(disabled=True),
-                "Target (Ω)": st.column_config.NumberColumn(format="%.3f", disabled=True),
-                "Current Tol (Ω)": st.column_config.NumberColumn(format="%.3f", disabled=True),
-                "Proposed Tol (Ω)": st.column_config.NumberColumn(format="%.3f", min_value=0.0, max_value=50.0, step=0.5),
-            },
-        )
-        try:
-            st.session_state["zo_tol_proposed_max_ohm"] = float(
-                zo_prop_edited.loc[zo_prop_edited["Metric"] == "Zo Max", "Proposed Tol (Ω)"].iloc[0]
-            )
-            st.session_state["zo_tol_proposed_min_ohm"] = float(
-                zo_prop_edited.loc[zo_prop_edited["Metric"] == "Zo Min", "Proposed Tol (Ω)"].iloc[0]
-            )
-        except Exception:
-            pass
+        st.subheader("Zo Histograms")
 
-        # Skew Proposed editor
-        skew_prop_df = pd.DataFrame([{
-            "Metric": "Δ Skew",
-            "Current Spec (pS)": curr_skew_ps,
-            "Proposed Spec (pS)": float(st.session_state["skew_proposed_ps"]),
-        }])
-        skew_prop_edited = st.data_editor(
-            skew_prop_df,
-            key=f"skew_prop_editor_{cat_key}",
-            num_rows="fixed",
-            hide_index=True,
-            column_config={
-                "Metric": st.column_config.TextColumn(disabled=True),
-                "Current Spec (pS)": st.column_config.NumberColumn(format="%.0f", disabled=True),
-                "Proposed Spec (pS)": st.column_config.NumberColumn(format="%.0f", min_value=0.0, max_value=100000.0, step=1.0),
-            },
-        )
-        try:
-            st.session_state["skew_proposed_ps"] = float(skew_prop_edited.at[0, "Proposed Spec (pS)"])
-        except Exception:
-            pass
-        zo_cat_df   = _zo_exec_summary_for_category(cat_key)
-        if zo_cat_df is None or zo_cat_df.empty:
-            st.info("No Zo data for this category.")
-        else:
-            st.dataframe(zo_cat_df, use_container_width=True)
-        skew_cat_df = _skew_exec_summary_for_category(cat_key)
+        cache_key = _data_cache_key()
 
-        if skew_cat_df is None or skew_cat_df.empty:
-            st.info("No Δ Skew data for this category.")
-        else:
-            st.dataframe(skew_cat_df, use_container_width=True)
-
-        st.divider()
-        st.subheader("Zo Histograms (P1 + P2 Combined)")
-
-
-        # Per-cable arrays for BOTH ends (Max)
-        df_max_p1 = collect_zo_max_values_df(st.session_state["cables"], category=cat_key, metric="max", end="P1")
-        df_max_p1["end"] = "P1"
-        df_max_p2 = collect_zo_max_values_df(st.session_state["cables"], category=cat_key, metric="max", end="P2")
-        df_max_p2["end"] = "P2"
+        # ====== Precompute (cached) ======
+        # Max
+        df_max_p1 = collect_zo_max_values_df_cached(cache_key, cat_key, "max", "P1"); df_max_p1["end"] = "P1"
+        df_max_p2 = collect_zo_max_values_df_cached(cache_key, cat_key, "max", "P2"); df_max_p2["end"] = "P2"
         df_max_both = pd.concat([df_max_p1, df_max_p2], ignore_index=True).rename(columns={"value": "max_value_ohm"})
 
-        # Per-cable arrays for BOTH ends (Min)
-        df_min_p1 = collect_zo_min_values_df(st.session_state["cables"], category=cat_key, metric="min", end="P1")
-        df_min_p1["end"] = "P1"
-        df_min_p2 = collect_zo_min_values_df(st.session_state["cables"], category=cat_key, metric="min", end="P2")
-        df_min_p2["end"] = "P2"
-        df_min_both = pd.concat([df_min_p1, df_min_p2], ignore_index=True).rename(columns={"value": "min_value_ohm"})
+        df_max_serial_long = pd.concat([
+            collect_zo_values_with_serial_cached(cache_key, cat_key, "max", "P1").assign(end="P1"),
+            collect_zo_values_with_serial_cached(cache_key, cat_key, "max", "P2").assign(end="P2"),
+        ], ignore_index=True)
 
-        cmax, cmin = st.columns(2)
-        with cmax:
+        st.divider()
+
+        # --------- MAX (hist + counts) ---------
+        with fragment_ctx():
             st.markdown(f"##### {cat_label} — Max Impedance (Ω)")
             if df_max_both.empty or df_max_both["max_value_ohm"].dropna().empty:
                 st.info("No Max data across P1/P2")
@@ -973,7 +850,7 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
                 fig = px.histogram(
                     df_max_both, x="max_value_ohm", color="end",
                     nbins=30, barmode="overlay", opacity=0.60,
-                    title=f"{cat_label} — Max Impedance (P1 + P2)",
+                    title=f"{cat_label} — Max Impedance",
                 )
                 fig.update_layout(
                     xaxis_title="Max Impedance (Ω)", yaxis_title="Count",
@@ -983,7 +860,68 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
                 fig.update_xaxes(range=[0, None])
                 st.plotly_chart(fig, use_container_width=True)
 
-        with cmin:
+                if df_max_serial_long is None or df_max_serial_long.empty:
+                    st.info("No cable-level Max impedance data available for this category.")
+                else:
+                    current_tol_max = _current_zo_tol_for_category(cat_key)
+                    target_ohm = float(st.session_state.get("zo_target_ohm", 50.0))
+
+                    prop_key_max = f"zo_tol_proposed_max_ohm__{cat_key}"
+                    if prop_key_max not in st.session_state:
+                        st.session_state[prop_key_max] = current_tol_max
+
+                    proposed_tol_max_local = st.number_input(
+                        f"Proposed tolerance (Ω) — Max — {cat_label}",
+                        key=f"zo_tol_prop_max_{cat_key}",
+                        min_value=0.0, max_value=1000.0,
+                        value=float(st.session_state[prop_key_max]),
+                        step=0.5,
+                        format="%.2f",  # ← prevents reruns on every keystroke
+                    )
+                    st.session_state[prop_key_max] = float(proposed_tol_max_local)
+
+                    counts_max = _zo_counts_by_cable(
+                        df=df_max_serial_long,
+                        target=target_ohm,
+                        tol_curr=current_tol_max,
+                        tol_prop=float(proposed_tol_max_local),
+                        value_col="value",
+                        serial_col="serial",
+                        per_cable_rule="all_channels",
+                    )
+
+                    def _pct(n: int, d: int) -> float:
+                        return (100.0 * float(n) / float(d)) if d and d > 0 else 0.0
+
+                    total = counts_max["total"]
+                    row_max = {
+                        "Cables — Total": total,
+                        "Pass (Current)": counts_max["pass_current"],
+                        "% Pass (Current)": f"{_pct(counts_max['pass_current'], total):.1f}%",
+                        "Fail (Current)": counts_max["fail_current"],
+                        "% Fail (Current)": f"{_pct(counts_max['fail_current'], total):.1f}%",
+                        "Pass (Proposed)": counts_max["pass_prop"],
+                        "% Pass (Proposed)": f"{_pct(counts_max['pass_prop'], total):.1f}%",
+                        "Fail (Proposed)": counts_max["fail_prop"],
+                        "% Fail (Proposed)": f"{_pct(counts_max['fail_prop'], total):.1f}%",
+                    }
+                    st.dataframe(pd.DataFrame([row_max]), hide_index=True, use_container_width=True)
+
+        st.markdown("---")
+
+        # ====== Precompute (cached) ======
+        # Min
+        df_min_p1 = collect_zo_min_values_df_cached(cache_key, cat_key, "min", "P1"); df_min_p1["end"] = "P1"
+        df_min_p2 = collect_zo_min_values_df_cached(cache_key, cat_key, "min", "P2"); df_min_p2["end"] = "P2"
+        df_min_both = pd.concat([df_min_p1, df_min_p2], ignore_index=True).rename(columns={"value": "min_value_ohm"})
+
+        df_min_serial_long = pd.concat([
+            collect_zo_values_with_serial_cached(cache_key, cat_key, "min", "P1").assign(end="P1"),
+            collect_zo_values_with_serial_cached(cache_key, cat_key, "min", "P2").assign(end="P2"),
+        ], ignore_index=True)
+
+        # --------- MIN (hist + counts) ---------
+        with fragment_ctx():
             st.markdown(f"##### {cat_label} — Min Impedance (Ω)")
             if df_min_both.empty or df_min_both["min_value_ohm"].dropna().empty:
                 st.info("No Min data across P1/P2")
@@ -991,7 +929,7 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
                 fig = px.histogram(
                     df_min_both, x="min_value_ohm", color="end",
                     nbins=30, barmode="overlay", opacity=0.60,
-                    title=f"{cat_label} — Min Impedance (P1 + P2)",
+                    title=f"{cat_label} — Min Impedance",
                 )
                 fig.update_layout(
                     xaxis_title="Min Impedance (Ω)", yaxis_title="Count",
@@ -1001,69 +939,134 @@ for (cat_key, cat_label), tab in zip(categories, tabs):
                 fig.update_xaxes(range=[0, None])
                 st.plotly_chart(fig, use_container_width=True)
 
-        st.divider()
-        st.subheader("Skew Histograms (Δ skew [pS], P1 + P2 Combined)")
+                if df_min_serial_long is None or df_min_serial_long.empty:
+                    st.info("No cable-level Min impedance data available for this category.")
+                else:
+                    current_tol_min = _current_zo_tol_for_category(cat_key)
+                    target_ohm = float(st.session_state.get("zo_target_ohm", 50.0))
 
-        df_delta_p1 = _collect_skew_delta(st.session_state["cables"], end="P1", category=cat_key).rename(columns={"value_ps": "delta_ps"})
+                    prop_key_min = f"zo_tol_proposed_min_ohm__{cat_key}"
+                    if prop_key_min not in st.session_state:
+                        st.session_state[prop_key_min] = current_tol_min
+
+                    proposed_tol_min_local = st.number_input(
+                        f"Proposed tolerance (Ω) — Min — {cat_label}",
+                        key=f"zo_tol_prop_min_{cat_key}",
+                        min_value=0.0, max_value=1000.0,
+                        value=float(st.session_state[prop_key_min]),
+                        step=0.5,
+                        format="%.2f",  # ← prevents reruns on every keystroke
+                    )
+                    st.session_state[prop_key_min] = float(proposed_tol_min_local)
+
+                    counts_min = _zo_counts_by_cable(
+                        df=df_min_serial_long,
+                        target=target_ohm,
+                        tol_curr=current_tol_min,
+                        tol_prop=float(proposed_tol_min_local),
+                        value_col="value",
+                        serial_col="serial",
+                        per_cable_rule="all_channels",
+                    )
+
+                    def _pct(n: int, d: int) -> float:
+                        return (100.0 * float(n) / float(d)) if d and d > 0 else 0.0
+
+                    total = counts_min["total"]
+                    row_min = {
+                        "Cables — Total": total,
+                        "Pass (Current)": counts_min["pass_current"],
+                        "% Pass (Current)": f"{_pct(counts_min['pass_current'], total):.1f}%",
+                        "Fail (Current)": counts_min["fail_current"],
+                        "% Fail (Current)": f"{_pct(counts_min['fail_current'], total):.1f}%",
+                        "Pass (Proposed)": counts_min["pass_prop"],
+                        "% Pass (Proposed)": f"{_pct(counts_min['pass_prop'], total):.1f}%",
+                        "Fail (Proposed)": counts_min["fail_prop"],
+                        "% Fail (Proposed)": f"{_pct(counts_min['fail_prop'], total):.1f}%",
+                    }
+                    st.dataframe(pd.DataFrame([row_min]), hide_index=True, use_container_width=True)
+
+        st.divider()
+        st.subheader("Skew Histograms (Δ skew [pS])")
+
+        # ====== Skew Δ both ends (cached) ======
+        df_delta_p1 = collect_skew_delta_cached(cache_key, end="P1", category=cat_key).rename(columns={"value_ps": "delta_ps"})
         df_delta_p1["end"] = "P1"
-        df_delta_p2 = _collect_skew_delta(st.session_state["cables"], end="P2", category=cat_key).rename(columns={"value_ps": "delta_ps"})
+        df_delta_p2 = collect_skew_delta_cached(cache_key, end="P2", category=cat_key).rename(columns={"value_ps": "delta_ps"})
         df_delta_p2["end"] = "P2"
         df_delta_both = pd.concat([df_delta_p1, df_delta_p2], ignore_index=True)
 
-        if df_delta_both.empty or df_delta_both["delta_ps"].dropna().empty:
-            st.info("No Δ skew data across P1/P2")
-        else:
-            fig = px.histogram(
-                df_delta_both, x="delta_ps", color="end",
-                nbins=30, barmode="overlay", opacity=0.6,
-                title=f"Δ Skew (pS) — {cat_label} — P1 + P2",
-            )
-            fig.update_layout(
-                xaxis_title="Δ skew [pS]", yaxis_title="Count",
-                margin=dict(l=10, r=10, t=40, b=10), template="plotly_white",
-                legend_title_text="End",
-            )
-            fig.update_xaxes(range=[0, None])
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Cable-level counts across both ends
-            df_delta_s_p1 = _collect_skew_delta_with_serial(st.session_state["cables"], end="P1", category=cat_key)
-            df_delta_s_p2 = _collect_skew_delta_with_serial(st.session_state["cables"], end="P2", category=cat_key)
-            df_delta_s = pd.concat([df_delta_s_p1, df_delta_s_p2], ignore_index=True)
-
-            if df_delta_s is None or df_delta_s.empty:
-                st.info("No cable-level skew data available for this category.")
+        with fragment_ctx():
+            if df_delta_both.empty or df_delta_both["delta_ps"].dropna().empty:
+                st.info("No Δ skew data across P1/P2")
             else:
-                current_spec_ps  = float(st.session_state.get("skew_current_spec_ps", 50.0))
-                proposed_spec_ps = float(st.session_state.get("skew_proposed_ps", current_spec_ps))
-
-                # Optional per-tab override input (unique key per category)
-                proposed_skew_ps_local = st.number_input(
-                    f"Proposed tolerance [pS] — {cat_label}",
-                    key=f"skew_tol_prop_combined_ps_{cat_key}",
-                    min_value=0.0,
-                    max_value=100000.0,
-                    value=proposed_spec_ps,
-                    step=1.0,
+                fig = px.histogram(
+                    df_delta_both, x="delta_ps", color="end",
+                    nbins=30, barmode="overlay", opacity=0.6,
+                    title=f"Δ Skew (pS) — {cat_label} ",
                 )
-
-                c_counts = _skew_counts_by_cable(
-                    df_delta_s,
-                    curr_ps=current_spec_ps,
-                    prop_ps=float(proposed_skew_ps_local),
-                    value_col="value_ps",
-                    serial_col="serial",
-                    per_cable_rule="all_channels",
+                fig.update_layout(
+                    xaxis_title="Δ skew [pS]", yaxis_title="Count",
+                    margin=dict(l=10, r=10, t=40, b=10), template="plotly_white",
+                    legend_title_text="End",
                 )
-                mcol1, mcol2, mcol3, mcol4 = st.columns([1,1,1,1])
-                mcol1.metric("Cables — Total", c_counts["total"])
-                mcol2.metric("Pass (Current)", c_counts["pass_current"])
-                mcol3.metric("Fail (Current)", c_counts["fail_current"])
-                mcol4.metric("Fail (Proposed)", c_counts["fail_prop"])
+                fig.update_xaxes(range=[0, None])
+                st.plotly_chart(fig, use_container_width=True)
 
-# ---------------------- Combined Downloads ----------------------
+                df_delta_s = pd.concat([
+                    collect_skew_delta_with_serial_cached(cache_key, end="P1", category=cat_key),
+                    collect_skew_delta_with_serial_cached(cache_key, end="P2", category=cat_key),
+                ], ignore_index=True)
+
+                if df_delta_s is None or df_delta_s.empty:
+                    st.info("No cable-level skew data available for this category.")
+                else:
+                    current_spec_ps  = float(st.session_state.get("skew_current_spec_ps", 50.0))
+                    proposed_spec_ps = float(st.session_state.get("skew_proposed_ps", current_spec_ps))
+
+                    proposed_skew_ps_local = st.number_input(
+                        f"Proposed tolerance [pS] — {cat_label}",
+                        key=f"skew_tol_prop_combined_ps_{cat_key}",
+                        min_value=0.0, max_value=100000.0,
+                        value=proposed_spec_ps, step=1.0,
+                        format="%.1f",  # ← prevents reruns on every keystroke
+                    )
+                    st.session_state["skew_proposed_ps"] = float(proposed_skew_ps_local)
+
+                    counts_skew = _skew_counts_by_cable(
+                        df_delta_s,
+                        curr_ps=current_spec_ps,
+                        prop_ps=float(proposed_skew_ps_local),
+                        value_col="value_ps",
+                        serial_col="serial",
+                        per_cable_rule="all_channels",
+                    )
+
+                    def _pct(n: int, d: int) -> float:
+                        return (100.0 * float(n) / float(d)) if d and d > 0 else 0.0
+
+                    total = counts_skew["total"]
+                    row_skew = {
+                        "Cables — Total": total,
+                        "Pass (Current)": counts_skew["pass_current"],
+                        "% Pass (Current)": f"{_pct(counts_skew['pass_current'], total):.1f}%",
+                        "Fail (Current)": counts_skew["fail_current"],
+                        "% Fail (Current)": f"{_pct(counts_skew['fail_current'], total):.1f}%",
+                        "Pass (Proposed)": counts_skew["pass_prop"],
+                        "% Pass (Proposed)": f"{_pct(counts_skew['pass_prop'], total):.1f}%",
+                        "Fail (Proposed)": counts_skew["fail_prop"],
+                        "% Fail (Proposed)": f"{_pct(counts_skew['fail_prop'], total):.1f}%",
+                    }
+                    st.dataframe(pd.DataFrame([row_skew]), hide_index=True, use_container_width=True)
+
+
+# ============================================================
+#                      Combined Downloads
+# ============================================================
 st.divider()
-st.subheader("Download Combined CSVs (P1 + P2)")
+st.subheader("Download Combined CSVs")
+
+cache_key = _data_cache_key()
 
 # Zo Combined Downloads
 zo_categories = [
@@ -1074,12 +1077,10 @@ zo_categories = [
 zo_metrics = [("max", "Max"), ("min", "Min")]
 
 for cat_key, cat_label in zo_categories:
-    with st.expander(f"Zo — {cat_label} (Combined P1 + P2)", expanded=False):
+    with st.expander(f"Zo — {cat_label}", expanded=False):
         for metric_key, metric_label in zo_metrics:
-            wide_p1 = build_zo_wide_matrix(st.session_state["cables"], category=cat_key, metric=metric_key, end="P1")
-            wide_p1["End"] = "P1"
-            wide_p2 = build_zo_wide_matrix(st.session_state["cables"], category=cat_key, metric=metric_key, end="P2")
-            wide_p2["End"] = "P2"
+            wide_p1 = build_zo_wide_matrix_cached(cache_key, category=cat_key, metric=metric_key, end="P1"); wide_p1["End"] = "P1"
+            wide_p2 = build_zo_wide_matrix_cached(cache_key, category=cat_key, metric=metric_key, end="P2"); wide_p2["End"] = "P2"
             wide_both = pd.concat([wide_p1, wide_p2], ignore_index=True)
 
             st.markdown(f"**{cat_label} — {metric_label} Impedance (Ω)**")
@@ -1088,9 +1089,9 @@ for cat_key, cat_label in zo_categories:
             else:
                 st.dataframe(wide_both.head(8), use_container_width=True)
                 st.download_button(
-                    label=f"Download {cat_label} {metric_label} (Combined P1+P2)",
+                    label=f"Download {cat_label} {metric_label}",
                     data=wide_both.to_csv(index=False),
-                    file_name=f"Zo_{cat_label}_{metric_label}_Combined_P1P2.csv",
+                    file_name=f"Zo_{cat_label}_{metric_label}_.csv",
                     mime="text/csv",
                     use_container_width=True,
                 )
@@ -1131,11 +1132,9 @@ def build_skew_wide_matrix(cables, *, end: str) -> pd.DataFrame:
     wide.reset_index(drop=True, inplace=True)
     return wide
 
-with st.expander("Skew Δ (pS) — Combined P1 + P2", expanded=False):
-    wide_p1 = build_skew_wide_matrix(st.session_state["cables"], end="P1")
-    wide_p1["End"] = "P1"
-    wide_p2 = build_skew_wide_matrix(st.session_state["cables"], end="P2")
-    wide_p2["End"] = "P2"
+with st.expander("Skew Δ (pS)", expanded=False):
+    wide_p1 = build_skew_wide_matrix_cached(cache_key, end="P1"); wide_p1["End"] = "P1"
+    wide_p2 = build_skew_wide_matrix_cached(cache_key, end="P2"); wide_p2["End"] = "P2"
     wide_both = pd.concat([wide_p1, wide_p2], ignore_index=True)
 
     if wide_both.empty:
@@ -1143,25 +1142,21 @@ with st.expander("Skew Δ (pS) — Combined P1 + P2", expanded=False):
     else:
         st.dataframe(wide_both.head(8), use_container_width=True)
         st.download_button(
-            label="Download Skew Δ (Combined P1+P2)",
+            label="Download Skew Δ",
             data=wide_both.to_csv(index=False),
-            file_name="Skew_Delta_Combined_P1P2.csv",
+            file_name="Skew_Delta_Combined.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
 # Skew Overall From Pair Cols Combined
-with st.expander("Skew Overall from Pair Columns — Combined P1 + P2", expanded=False):
-    long_p1 = _collect_skew_overall_from_paircols_per_test(st.session_state["cables"], end="P1")
-    long_p1["End"] = "P1"
-    long_p2 = _collect_skew_overall_from_paircols_per_test(st.session_state["cables"], end="P2")
-    long_p2["End"] = "P2"
+with st.expander("Skew Overall from Pair Columns ", expanded=False):
+    long_p1 = collect_skew_overall_from_paircols_per_test_cached(cache_key, end="P1"); long_p1["End"] = "P1"
+    long_p2 = collect_skew_overall_from_paircols_per_test_cached(cache_key, end="P2"); long_p2["End"] = "P2"
     long_both = pd.concat([long_p1, long_p2], ignore_index=True)
 
-    wide_p1 = build_skew_overall_from_paircols_wide(st.session_state["cables"], end="P1")
-    wide_p1["End"] = "P1"
-    wide_p2 = build_skew_overall_from_paircols_wide(st.session_state["cables"], end="P2")
-    wide_p2["End"] = "P2"
+    wide_p1 = build_skew_overall_from_paircols_wide_cached(cache_key, end="P1"); wide_p1["End"] = "P1"
+    wide_p2 = build_skew_overall_from_paircols_wide_cached(cache_key, end="P2"); wide_p2["End"] = "P2"
     wide_both = pd.concat([wide_p1, wide_p2], ignore_index=True)
 
     if long_both.empty:
@@ -1170,9 +1165,9 @@ with st.expander("Skew Overall from Pair Columns — Combined P1 + P2", expanded
         st.markdown("**Preview (LONG Format)**")
         st.dataframe(long_both.head(8), use_container_width=True)
         st.download_button(
-            label="Download Skew Overall (Combined P1+P2) — LONG",
+            label="Download Skew Overall — LONG",
             data=long_both.to_csv(index=False),
-            file_name="Skew_Overall_Combined_P1P2_LONG.csv",
+            file_name="Skew_Overall_Combined_LONG.csv",
             mime="text/csv",
             use_container_width=True,
         )
@@ -1180,13 +1175,17 @@ with st.expander("Skew Overall from Pair Columns — Combined P1 + P2", expanded
         st.markdown("**Preview (WIDE Format)**")
         st.dataframe(wide_both.head(8), use_container_width=True)
         st.download_button(
-            label="Download Skew Overall (Combined P1+P2) — WIDE",
+            label="Download Skew Overall WIDE",
             data=wide_both.to_csv(index=False),
-            file_name="Skew_Overall_Combined_P1P2_WIDE.csv",
+            file_name="Skew_Overall_Combined_WIDE.csv",
             mime="text/csv",
             use_container_width=True,
         )
-# ---------------------- Trace Upload & Overlay (Combined P1+P2) ----------------------
+
+
+# ============================================================
+#                     Traces Upload & Overlay
+# ============================================================
 processed_trace = st.session_state.setdefault("processed_trace_files", [])
 
 if uploaded_trace_csvs:
@@ -1257,84 +1256,88 @@ def pick_xy_columns(df: pd.DataFrame):
 
     return x_col, y_col
 
-from itertools import cycle
-unique_palette = (
-    px.colors.qualitative.Plotly
-    + px.colors.qualitative.D3
-    + px.colors.qualitative.Set2
-    + px.colors.qualitative.Safe
-    + px.colors.qualitative.Pastel
-)
-# Prevent extremely long legends from reusing the same first few colors too soon
-color_cycle = cycle(unique_palette)
+# Optional: Only build overlays when requested (speeds up spec edits)
+show_traces = st.checkbox("Show trace overlays", value=False, key="show_traces_overlay")
 
-for cable in st.session_state.get("cables", []):
-    sn = getattr(cable, "serial_number", "?")
-    si_list = getattr(cable, "TESTS", {}).get("si", []) or []
-
-    traces_all = []  # list of (end, name, df)
-    for t in si_list:
-        test_end = (getattr(t, "test_end", "") or "").upper()
-        traces_obj = getattr(t, "traces", None)
-        if not isinstance(traces_obj, dict) or not traces_obj:
-            continue
-        for name, df in traces_obj.items():
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                traces_all.append((test_end, name, df))
-
-    if not traces_all:
-        continue
-
-    st.markdown(f"### Cable **{sn}**")
-    fig = go.Figure()
-
-    # Reset a color cycle **per cable** so each cable starts at the same palette
-    per_cable_cycle = cycle(unique_palette)
-
-    for end, name, df in traces_all:
-        x_col, y_col = pick_xy_columns(df)
-        if x_col is None or y_col is None:
-            st.warning(f"Skipping trace '{name}' (could not infer x/y columns).")
-            continue
-
-        x_vals = pd.to_numeric(df[x_col], errors="coerce").to_numpy(dtype=float)
-        y_vals = pd.to_numeric(df[y_col], errors="coerce").to_numpy(dtype=float)
-        mask = np.isfinite(x_vals) & np.isfinite(y_vals)
-        x_vals, y_vals = x_vals[mask], y_vals[mask]
-
-        if len(x_vals) < 2:
-            st.warning(f"Skipping trace '{name}' (too few points after cleaning).")
-            continue
-
-        use_gl = len(x_vals) > 5000
-        trace_cls = go.Scattergl if use_gl else go.Scatter
-
-        color_this_trace = next(per_cable_cycle)
-
-        fig.add_trace(
-            trace_cls(
-                x=x_vals, y=y_vals, mode="lines",
-                name=f"{end} — {name}",
-                line=dict(width=1.4, color=color_this_trace),
-                hovertemplate=f"<b>{end} — {name}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>",
-            )
+if show_traces:
+    with fragment_ctx():
+        unique_palette = (
+            px.colors.qualitative.Plotly
+            + px.colors.qualitative.D3
+            + px.colors.qualitative.Set2
+            + px.colors.qualitative.Safe
+            + px.colors.qualitative.Pastel
         )
 
-    fig.update_layout(
-        title=f"Overlay — Cable {sn} — P1 & P2",
-        template="plotly_white",
-        legend=dict(
-            orientation="v",
-            yanchor="top",  y=1.0,
-            xanchor="left", x=1.02,   
-            traceorder="normal",
-            bgcolor="rgba(255,255,255,0.6)",
-            bordercolor="rgba(0,0,0,0.2)",
-            borderwidth=1,
-        ),
-        margin=dict(l=10, r=180, t=48, b=10),  
-        hovermode="x unified",
-    )
-    fig.update_xaxes(title_text="Time [s]")
-    fig.update_yaxes(title_text="Resistance (Ω)")
-    st.plotly_chart(fig, use_container_width=True)
+        for cable in st.session_state.get("cables", []):
+            sn = getattr(cable, "serial_number", "?")
+            si_list = getattr(cable, "TESTS", {}).get("si", []) or []
+
+            traces_all = []  # list of (end, name, df)
+            for t in si_list:
+                test_end = (getattr(t, "test_end", "") or "").upper()
+                traces_obj = getattr(t, "traces", None)
+                if not isinstance(traces_obj, dict) or not traces_obj:
+                    continue
+                for name, df in traces_obj.items():
+                    if isinstance(df, pd.DataFrame) and not df.empty:
+                        traces_all.append((test_end, name, df))
+
+            if not traces_all:
+                continue
+
+            st.markdown(f"### Cable **{sn}**")
+            fig = go.Figure()
+
+            # Reset a color cycle per cable so each cable starts the same palette
+            per_cable_cycle = cycle(unique_palette)
+
+            for end, name, df in traces_all:
+                x_col, y_col = pick_xy_columns(df)
+                if x_col is None or y_col is None:
+                    st.warning(f"Skipping trace '{name}' (could not infer x/y columns).")
+                    continue
+
+                x_vals = pd.to_numeric(df[x_col], errors="coerce").to_numpy(dtype=float)
+                y_vals = pd.to_numeric(df[y_col], errors="coerce").to_numpy(dtype=float)
+                mask = np.isfinite(x_vals) & np.isfinite(y_vals)
+                x_vals, y_vals = x_vals[mask], y_vals[mask]
+
+                if len(x_vals) < 2:
+                    st.warning(f"Skipping trace '{name}' (too few points after cleaning).")
+                    continue
+
+                use_gl = len(x_vals) > 5000
+                trace_cls = go.Scattergl if use_gl else go.Scatter
+
+                color_this_trace = next(per_cable_cycle)
+
+                fig.add_trace(
+                    trace_cls(
+                        x=x_vals, y=y_vals, mode="lines",
+                        name=f"{end} — {name}",
+                        line=dict(width=1.4, color=color_this_trace),
+                        hovertemplate=f"<b>{end} — {name}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>",
+                    )
+                )
+
+            fig.update_layout(
+                title=f"Overlay — Cable {sn} — P1 & P2",
+                template="plotly_white",
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",  y=1.0,
+                    xanchor="left", x=1.02,
+                    traceorder="normal",
+                    bgcolor="rgba(255,255,255,0.6)",
+                    bordercolor="rgba(0,0,0,0.2)",
+                    borderwidth=1,
+                ),
+                margin=dict(l=10, r=180, t=48, b=10),
+                hovermode="x unified",
+            )
+            fig.update_xaxes(title_text="Time [s]")
+            fig.update_yaxes(title_text="Resistance (Ω)")
+            st.plotly_chart(fig, use_container_width=True)
+else:
+    st.caption("Trace overlays are disabled to keep the page snappy while you tune specs. Check the box above to render them.")

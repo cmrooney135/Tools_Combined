@@ -48,7 +48,62 @@ def _to_list(x):
     if isinstance(x, (list, tuple)):
         return list(x)
     return [x]
+import plotly.express as px
 
+def make_reasons_fig(df: pd.DataFrame, *, title: str = "Failure Reasons (split by direction)", show_na: bool = True, barmode: str = "stack"):
+    """
+    Build a bar chart of failure counts by reason, split by direction (High/Low/N/A).
+    Expects df to have columns: ['Detail'] at minimum; 'Category' and 'Direction' are computed if missing.
+    - barmode: 'stack' (default) for stacked split, or 'group' for side-by-side.
+    """
+    if df is None or df.empty:
+        return None
+
+    work = df.copy()
+    if "Detail" not in work.columns:
+        work["Detail"] = ""
+
+    # Ensure Category and Direction
+    if "Category" not in work.columns:
+        work["Category"] = work["Detail"].apply(bucket_reason)
+    if "Direction" not in work.columns:
+        work["Direction"] = work["Detail"].apply(reason_direction)
+
+    if not show_na:
+        work = work[work["Direction"].isin(["High", "Low"])]
+
+    # Order reasons so wiring issues appear first, then High/Low, then Other
+    reason_order = ["Short", "Miswire", "Open", "Wire Missing", "High", "Low", "Other"]
+    work["Category"] = pd.Categorical(work["Category"], categories=reason_order, ordered=True)
+
+    counts = (
+        work.groupby(["Category", "Direction"], dropna=False)
+            .size()
+            .reset_index(name="Count")
+    )
+
+    # If everything is empty after filtering, bail
+    if counts.empty:
+        return None
+
+    fig = px.bar(
+        counts,
+        x="Category",
+        y="Count",
+        color="Direction",
+        barmode=barmode,  # 'stack' or 'group'
+        title=title,
+        category_orders={"Category": reason_order, "Direction": ["High", "Low", "N/A"]},
+        color_discrete_map={"High": "#d62728", "Low": "#1f77b4", "N/A": "#7f7f7f"},
+    )
+    fig.update_layout(
+        legend_title_text="方向 (Direction)",  # localized legend title if desired
+        xaxis_title="Reason",
+        yaxis_title="Count",
+        margin=dict(l=10, r=10, t=50, b=10),
+        bargap=0.25,
+    )
+    return fig
 def normalize_channel(cell):
     # Return a safe (list_a, list_b) tuple for any input
     if cell is None:
@@ -71,18 +126,47 @@ def widget_key(*parts) -> str:
 
 cables = st.session_state["cables"] 
 def bucket_reason(text: str) -> str:
+    """
+    Coarse failure 'reason' bucketing. Keeps 'High' and 'Low' as reasons
+    only if Detail doesn't already describe a more specific problem like short/miswire/open/missing.
+    """
+    if not isinstance(text, str):
+        return "Other"
+
     t = text.lower()
+
+    # Specific wiring/connection issues
     if "short" in t:
-        return "short"
+        return "Short"
     if "miswire" in t:
         return "Miswire"
-    if "high" in t:
-        return "High"
     if "open" in t:
         return "Open"
     if "missing" in t:
         return "Wire Missing"
+
+    # Directional issues (generic high/low)
+    if "high" in t:
+        return "High"
+    if "low" in t:
+        return "Low"
+
     return "Other"
+
+
+def reason_direction(text: str) -> str:
+    """
+    Extract direction for visualization: 'High', 'Low', or 'N/A'.
+    Looks only at plain-language keywords in the Detail string.
+    """
+    if not isinstance(text, str):
+        return "N/A"
+    t = text.lower()
+    if "high" in t:
+        return "High"
+    if "low" in t:
+        return "Low"
+    return "N/A"
 
 def make_hashable(ch):
     if isinstance(ch, tuple):
