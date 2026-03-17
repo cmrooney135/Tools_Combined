@@ -112,6 +112,7 @@ class Tesla(Cable):
             right = (m.group("right") or "").upper()  # e.g., DIB / P2
             if left and right:
                 out.append(f"{left}{right}")          # e.g., A34DIB, E54P2
+        print(tuple(out))
 
         return tuple(out)
 
@@ -298,9 +299,6 @@ class Tesla(Cable):
             raise ValueError(f"Unknown agg: {agg}")
 
         # ---- parsing helpers ----
-        
-
-
         def _blankify(x):
                 """Normalize empty/blank representations to None ([], '', '[]', 'None', None)."""
                 if x is None:

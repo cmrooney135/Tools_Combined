@@ -38,3 +38,7 @@ def top_bar(page_icon: str, title: str, home_page_path: str = "Home.py"):
     # Title with page icon (center)
     with col_title:
         st.title(f"{page_icon} {title}")
+
+    # Sidebar feedback link
+    with st.sidebar:
+        st.markdown("[📩 Submit a Bug or Suggestion](https://carolsfeedback.streamlit.app/)")
