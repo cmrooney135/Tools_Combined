@@ -2,11 +2,16 @@
 from Paradise import Paradise
 from Tesla import Tesla
 
+
 CABLE_MAP = {
-    "0": (Paradise, 11),
-    "1": (Paradise, 15),
-    "3": (Tesla, 11),
-    "4": (Tesla, 15),
+    "03": (Tesla, 12),
+    "A1": (Tesla, 12),
+    "04": (Tesla, 15),
+    "A2": (Tesla, 15),
+    "00": (Paradise, 12),
+    "9F": (Paradise, 12),
+    "01": (Paradise, 15),
+    "A0": (Paradise, 15),
 }
 
 def create_cable(serial_number: str):
@@ -17,7 +22,7 @@ def create_cable(serial_number: str):
     if len(serial) < 2:
         return None
 
-    key = serial[1]
+    key = serial[:2]
     mapping = CABLE_MAP.get(key)
     if mapping is None:
         return None
